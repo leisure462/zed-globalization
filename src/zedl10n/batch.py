@@ -8,7 +8,7 @@ from .prompts import build_user_prompt, estimate_tokens
 
 log = logging.getLogger(__name__)
 
-MAX_INPUT_TOKENS = 50_000
+MAX_INPUT_TOKENS = 10_000
 
 
 def estimate_request_tokens(

@@ -24,6 +24,10 @@ on:
           - ja
           - ko
         default: zh-CN
+      skip_check:
+        description: "跳过编译检查（加速手动触发）"
+        type: boolean
+        default: false
 permissions:
   contents: write
   actions: write
@@ -144,6 +148,7 @@ jobs:
         run: python3 patch_agent_env.py --source-root zed
 
       - name: 安装编译依赖
+        if: ${{ inputs.skip_check != true }}
         run: |
           sudo apt update
           sudo apt install -y build-essential pkg-config libasound2-dev \
@@ -156,9 +161,11 @@ jobs:
             libssl-dev libudev-dev libclang-dev clang cmake
 
       - name: 安装 Rust
+        if: ${{ inputs.skip_check != true }}
         uses: dtolnay/rust-toolchain@stable
 
       - name: 编译检查
+        if: ${{ inputs.skip_check != true }}
         env:
           RUSTC_WRAPPER: ""
         run: |
@@ -202,6 +209,8 @@ jobs:
       BUILD_VERSION: ${{ needs.versioning.outputs.upstream_version }}
       LANG_LOWER: ${{ needs.versioning.outputs.lang_lower }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: 开启 Git Longpaths
         run: git config --system core.longpaths true
 
@@ -297,8 +306,39 @@ jobs:
             Write-Host "⚠ sccache 所有安装方式均失败，将不使用编译缓存"
           }
 
-      - name: 恢复 sccache 缓存
+      - name: 从 Artifact 恢复 sccache 缓存
         if: env.SCCACHE_AVAILABLE == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          CACHE_KEY="sccache-windows-x86_64"
+          PREV_RUN_ID=$(gh api \
+            "/repos/${{ github.repository }}/contents/sccache/${CACHE_KEY}.runid?ref=i18n" \
+            --jq '.content' 2>/dev/null | \
+            python3 -c "import base64,sys; print(base64.b64decode(sys.stdin.read()).decode().strip())" \
+            2>/dev/null || true)
+          [ -z "$PREV_RUN_ID" ] && echo "⚠ 无缓存索引，首次构建" && exit 0
+          ARTIFACT_ID=$(gh api \
+            "/repos/${{ github.repository }}/actions/runs/${PREV_RUN_ID}/artifacts" \
+            --jq ".artifacts[] | select(.name == \"${CACHE_KEY}\") | .id" 2>/dev/null || true)
+          [ -z "$ARTIFACT_ID" ] && echo "⚠ Artifact 不存在或已过期" && exit 0
+          echo "下载缓存 Artifact (ID: $ARTIFACT_ID)..."
+          curl -sL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            -o /tmp/sccache-cache.zip
+          unzip -p /tmp/sccache-cache.zip "${CACHE_KEY}.tar.gz" | \
+            tar -xzf - -C /d/ 2>/dev/null || true
+          rm -f /tmp/sccache-cache.zip
+          echo "✓ 缓存已恢复（Artifact）"
+          echo "PREV_ARTIFACT_ID=${ARTIFACT_ID}" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_HIT=artifact" >> "$GITHUB_ENV"
+
+      - name: 从 Cache 恢复 sccache 缓存（Artifact 失败时回退）
+        if: env.SCCACHE_AVAILABLE == 'true' && env.SCCACHE_CACHE_HIT != 'artifact'
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -346,32 +386,30 @@ jobs:
               }
           }
 
-          cd D:\z
-          $maxRetries = 3
-          $retryCount = 0
-          do {
-              $retryCount++
-              Write-Host "Build Attempt $retryCount / $maxRetries"
-              cargo build --release --jobs 4
-              if ($LASTEXITCODE -eq 0) { Write-Host "Success!"; break }
-              Write-Host "Failed code $LASTEXITCODE."
-              if ($retryCount -lt $maxRetries) { Start-Sleep -Seconds 15 }
-          } while ($retryCount -lt $maxRetries)
+          python3 "$env:GITHUB_WORKSPACE\script\ci-build.py" --source-dir D:\z --jobs 4 --retries 3
+          $buildExit = $LASTEXITCODE
 
           # 停止监控并输出摘要
           Stop-Job $monitorJob; Remove-Job $monitorJob
-          $csv = Import-Csv "D:\mem_monitor.csv"
-          $peakMem  = ($csv | Measure-Object -Property used_mb -Maximum).Maximum
-          $peakSwap = ($csv | Measure-Object -Property swap_used_mb -Maximum).Maximum
-          $totalMem = $csv[0].total_mb
-          $totalSwap = $csv[0].swap_total_mb
           Write-Host "===== 内存监控摘要 ====="
-          Write-Host "物理内存: 峰值 ${peakMem}MB / 总计 ${totalMem}MB"
-          Write-Host "交换内存: 峰值 ${peakSwap}MB / 总计 ${totalSwap}MB"
-          if ([int]$peakSwap -gt 0) { Write-Host "⚠ 编译期间使用了交换内存!" }
-          Write-Host "采样记录数: $($csv.Count)"
+          if (Test-Path "D:\mem_monitor.csv") {
+              $csv = Import-Csv "D:\mem_monitor.csv"
+              if ($csv.Count -gt 0) {
+                  $peakMem  = ($csv | Measure-Object -Property used_mb -Maximum).Maximum
+                  $peakSwap = ($csv | Measure-Object -Property swap_used_mb -Maximum).Maximum
+                  $totalMem = $csv[0].total_mb
+                  Write-Host "物理内存: 峰值 ${peakMem}MB / 总计 ${totalMem}MB"
+                  Write-Host "交换内存: 峰值 ${peakSwap}MB"
+                  if ([int]$peakSwap -gt 0) { Write-Host "⚠ 编译期间使用了交换内存!" }
+                  Write-Host "采样记录数: $($csv.Count)"
+              } else {
+                  Write-Host "(no samples collected)"
+              }
+          } else {
+              Write-Host "(monitor did not produce data)"
+          }
 
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if ($buildExit -ne 0) { exit $buildExit }
 
       - name: 停止 sccache
         if: env.SCCACHE_AVAILABLE == 'true'
@@ -398,16 +436,57 @@ jobs:
           Write-Host ""
           sccache --stop-server || $true
 
-      - name: 清理旧缓存
+      - name: 打包 sccache 缓存
         if: always() && env.SCCACHE_AVAILABLE == 'true'
+        shell: bash
+        run: |
+          CACHE_KEY="sccache-windows-x86_64"
+          tar -czf "${CACHE_KEY}.tar.gz" \
+            --ignore-failed-read \
+            -C /d \
+            c/sccache c/registry c/git 2>/dev/null || true
+          echo "缓存归档大小: $(du -sh ${CACHE_KEY}.tar.gz | cut -f1)"
+
+      - name: 上传 sccache 缓存 Artifact
+        id: upload_artifact
+        if: always() && env.SCCACHE_AVAILABLE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sccache-windows-x86_64
+          path: sccache-windows-x86_64.tar.gz
+          retention-days: 30
+
+      - name: 更新缓存索引
+        if: always() && env.SCCACHE_AVAILABLE == 'true' && steps.upload_artifact.outcome == 'success'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: gh api -X DELETE "repos/${{ github.repository }}/actions/caches?key=sccache-windows-x86_64"
+        run: |
+          CACHE_KEY="sccache-windows-x86_64"
+          if [ -n "${PREV_ARTIFACT_ID:-}" ]; then
+            gh api -X DELETE \
+              "/repos/${{ github.repository }}/actions/artifacts/${PREV_ARTIFACT_ID}" \
+              && echo "✓ 已删除旧 Artifact" || true
+          fi
+          FILE_PATH="sccache/${CACHE_KEY}.runid"
+          CONTENT_B64=$(python3 -c "import base64; print(base64.b64encode('${{ github.run_id }}'.encode()).decode())")
+          FILE_SHA=$(gh api \
+            "/repos/${{ github.repository }}/contents/${FILE_PATH}?ref=i18n" \
+            --jq '.sha' 2>/dev/null || true)
+          if [ -n "$FILE_SHA" ]; then
+            gh api -X PUT "/repos/${{ github.repository }}/contents/${FILE_PATH}" \
+              -f message="chore: 更新 sccache 缓存索引 (${CACHE_KEY})" \
+              -f content="$CONTENT_B64" -f sha="$FILE_SHA" -f branch="i18n"
+          else
+            gh api -X PUT "/repos/${{ github.repository }}/contents/${FILE_PATH}" \
+              -f message="chore: 更新 sccache 缓存索引 (${CACHE_KEY})" \
+              -f content="$CONTENT_B64" -f branch="i18n"
+          fi
+          echo "✓ 缓存索引已更新 (Run ID: ${{ github.run_id }})"
 
-      - name: 保存 sccache 缓存
-        if: always() && env.SCCACHE_AVAILABLE == 'true'
+      - name: 保存 sccache 缓存（Artifact 失败时回退）
+        if: always() && env.SCCACHE_AVAILABLE == 'true' && steps.upload_artifact.outcome != 'success'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -442,6 +521,8 @@ jobs:
       BUILD_VERSION: ${{ needs.versioning.outputs.upstream_version }}
       LANG_LOWER: ${{ needs.versioning.outputs.lang_lower }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: 释放磁盘空间
         uses: jlumbroso/free-disk-space@main
         with:
@@ -476,8 +557,8 @@ jobs:
             libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
             libxcb-randr0-dev libxcb-keysyms1-dev libxcb-util-dev \
             libgl1-mesa-dev libegl1-mesa-dev libfreetype6-dev libfontconfig1-dev \
-            libssl-dev libudev-dev libclang-dev clang cmake binutils-gold
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=gold -Clink-arg=-Wl,--no-threads" >> $GITHUB_ENV
+            libssl-dev libudev-dev libclang-dev clang cmake mold
+          echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
 
       - name: 克隆 Zed 源码并检出 Tag
         run: |
@@ -496,8 +577,38 @@ jobs:
           cd zed
           git apply ../l10n.patch
 
-      - name: 恢复 sccache 缓存
+      - name: 从 Artifact 恢复 sccache 缓存
         if: env.SCCACHE_AVAILABLE == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CACHE_KEY="sccache-linux-x86_64"
+          PREV_RUN_ID=$(gh api \
+            "/repos/${{ github.repository }}/contents/sccache/${CACHE_KEY}.runid?ref=i18n" \
+            --jq '.content' 2>/dev/null | \
+            python3 -c "import base64,sys; print(base64.b64decode(sys.stdin.read()).decode().strip())" \
+            2>/dev/null || true)
+          [ -z "$PREV_RUN_ID" ] && echo "⚠ 无缓存索引，首次构建" && exit 0
+          ARTIFACT_ID=$(gh api \
+            "/repos/${{ github.repository }}/actions/runs/${PREV_RUN_ID}/artifacts" \
+            --jq ".artifacts[] | select(.name == \"${CACHE_KEY}\") | .id" 2>/dev/null || true)
+          [ -z "$ARTIFACT_ID" ] && echo "⚠ Artifact 不存在或已过期" && exit 0
+          echo "下载缓存 Artifact (ID: $ARTIFACT_ID)..."
+          curl -sL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            -o /tmp/sccache-cache.zip
+          unzip -p /tmp/sccache-cache.zip "${CACHE_KEY}.tar.gz" | \
+            tar -xzf - -C / 2>/dev/null || true
+          rm -f /tmp/sccache-cache.zip
+          echo "✓ 缓存已恢复（Artifact）"
+          echo "PREV_ARTIFACT_ID=${ARTIFACT_ID}" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_HIT=artifact" >> "$GITHUB_ENV"
+
+      - name: 从 Cache 恢复 sccache 缓存（Artifact 失败时回退）
+        if: env.SCCACHE_AVAILABLE == 'true' && env.SCCACHE_CACHE_HIT != 'artifact'
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -506,6 +617,7 @@ jobs:
             ~/.cargo/git
           key: sccache-linux-x86_64
           restore-keys: sccache-linux
+
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -548,9 +660,10 @@ jobs:
           ) &
           MONITOR_PID=$!
 
-          cd zed
-          cargo build --release --jobs 4 --locked
+          set +e
+          python3 "$GITHUB_WORKSPACE/script/ci-build.py" --source-dir "$GITHUB_WORKSPACE/zed" --jobs 4
           BUILD_EXIT=$?
+          set -e
 
           # 停止监控并输出摘要
           kill $MONITOR_PID 2>/dev/null || true
@@ -591,15 +704,57 @@ jobs:
           echo ""
           sccache --stop-server || true
 
-      - name: 清理旧缓存
+      - name: 打包 sccache 缓存
         if: always() && env.SCCACHE_AVAILABLE == 'true'
+        run: |
+          CACHE_KEY="sccache-linux-x86_64"
+          tar -czf "${CACHE_KEY}.tar.gz" \
+            --ignore-failed-read \
+            -C / \
+            home/runner/.cache/sccache \
+            home/runner/.cargo/registry \
+            home/runner/.cargo/git 2>/dev/null || true
+          echo "缓存归档大小: $(du -sh ${CACHE_KEY}.tar.gz | cut -f1)"
+
+      - name: 上传 sccache 缓存 Artifact
+        id: upload_artifact
+        if: always() && env.SCCACHE_AVAILABLE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sccache-linux-x86_64
+          path: sccache-linux-x86_64.tar.gz
+          retention-days: 30
+
+      - name: 更新缓存索引
+        if: always() && env.SCCACHE_AVAILABLE == 'true' && steps.upload_artifact.outcome == 'success'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X DELETE "repos/${{ github.repository }}/actions/caches?key=sccache-linux"
+        run: |
+          CACHE_KEY="sccache-linux-x86_64"
+          if [ -n "${PREV_ARTIFACT_ID:-}" ]; then
+            gh api -X DELETE \
+              "/repos/${{ github.repository }}/actions/artifacts/${PREV_ARTIFACT_ID}" \
+              && echo "✓ 已删除旧 Artifact" || true
+          fi
+          FILE_PATH="sccache/${CACHE_KEY}.runid"
+          CONTENT_B64=$(python3 -c "import base64; print(base64.b64encode('${{ github.run_id }}'.encode()).decode())")
+          FILE_SHA=$(gh api \
+            "/repos/${{ github.repository }}/contents/${FILE_PATH}?ref=i18n" \
+            --jq '.sha' 2>/dev/null || true)
+          if [ -n "$FILE_SHA" ]; then
+            gh api -X PUT "/repos/${{ github.repository }}/contents/${FILE_PATH}" \
+              -f message="chore: 更新 sccache 缓存索引 (${CACHE_KEY})" \
+              -f content="$CONTENT_B64" -f sha="$FILE_SHA" -f branch="i18n"
+          else
+            gh api -X PUT "/repos/${{ github.repository }}/contents/${FILE_PATH}" \
+              -f message="chore: 更新 sccache 缓存索引 (${CACHE_KEY})" \
+              -f content="$CONTENT_B64" -f branch="i18n"
+          fi
+          echo "✓ 缓存索引已更新 (Run ID: ${{ github.run_id }})"
 
-      - name: 保存 sccache 缓存
-        if: always() && env.SCCACHE_AVAILABLE == 'true'
+      - name: 保存 sccache 缓存（Artifact 失败时回退）
+        if: always() && env.SCCACHE_AVAILABLE == 'true' && steps.upload_artifact.outcome != 'success'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -607,6 +762,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: sccache-linux-x86_64
+
       - name: 打包 Linux
         run: |
           objcopy --strip-debug zed/target/release/zed
@@ -684,6 +840,8 @@ jobs:
       SCCACHE_IDLE_TIMEOUT: "0"
       BUILD_VERSION: ${{ needs.versioning.outputs.upstream_version }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: 安装 sccache
         continue-on-error: true
         uses: mozilla-actions/sccache-action@v0.0.3
@@ -710,8 +868,38 @@ jobs:
       - name: 应用本地化补丁
         run: cd zed && git apply ../l10n.patch
 
-      - name: 恢复 sccache 缓存
+      - name: 从 Artifact 恢复 sccache 缓存
         if: env.SCCACHE_AVAILABLE == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CACHE_KEY="sccache-macos-aarch64"
+          PREV_RUN_ID=$(gh api \
+            "/repos/${{ github.repository }}/contents/sccache/${CACHE_KEY}.runid?ref=i18n" \
+            --jq '.content' 2>/dev/null | \
+            python3 -c "import base64,sys; print(base64.b64decode(sys.stdin.read()).decode().strip())" \
+            2>/dev/null || true)
+          [ -z "$PREV_RUN_ID" ] && echo "⚠ 无缓存索引，首次构建" && exit 0
+          ARTIFACT_ID=$(gh api \
+            "/repos/${{ github.repository }}/actions/runs/${PREV_RUN_ID}/artifacts" \
+            --jq ".artifacts[] | select(.name == \"${CACHE_KEY}\") | .id" 2>/dev/null || true)
+          [ -z "$ARTIFACT_ID" ] && echo "⚠ Artifact 不存在或已过期" && exit 0
+          echo "下载缓存 Artifact (ID: $ARTIFACT_ID)..."
+          curl -sL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            -o /tmp/sccache-cache.zip
+          unzip -p /tmp/sccache-cache.zip "${CACHE_KEY}.tar.gz" | \
+            tar -xzf - -C / 2>/dev/null || true
+          rm -f /tmp/sccache-cache.zip
+          echo "✓ 缓存已恢复（Artifact）"
+          echo "PREV_ARTIFACT_ID=${ARTIFACT_ID}" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_HIT=artifact" >> "$GITHUB_ENV"
+
+      - name: 从 Cache 恢复 sccache 缓存（Artifact 失败时回退）
+        if: env.SCCACHE_AVAILABLE == 'true' && env.SCCACHE_CACHE_HIT != 'artifact'
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -759,8 +947,10 @@ jobs:
           ) &
           MONITOR_PID=$!
 
-          cd zed && cargo build --release --target aarch64-apple-darwin --jobs 4 --locked
+          set +e
+          python3 "$GITHUB_WORKSPACE/script/ci-build.py" --source-dir "$GITHUB_WORKSPACE/zed" --target aarch64-apple-darwin --jobs 4
           BUILD_EXIT=$?
+          set -e
 
           kill $MONITOR_PID 2>/dev/null || true
           PEAK_MEM=$(tail -n +2 "$MEM_LOG" | cut -d, -f2 | sort -n | tail -1)
@@ -790,15 +980,57 @@ jobs:
           echo "========================================="
           sccache --stop-server || true
 
-      - name: 清理旧缓存
+      - name: 打包 sccache 缓存
         if: always() && env.SCCACHE_AVAILABLE == 'true'
+        run: |
+          CACHE_KEY="sccache-macos-aarch64"
+          tar -czf "${CACHE_KEY}.tar.gz" \
+            --ignore-failed-read \
+            -C / \
+            Users/runner/Library/Caches/Mozilla.sccache \
+            Users/runner/.cargo/registry \
+            Users/runner/.cargo/git 2>/dev/null || true
+          echo "缓存归档大小: $(du -sh ${CACHE_KEY}.tar.gz | cut -f1)"
+
+      - name: 上传 sccache 缓存 Artifact
+        id: upload_artifact
+        if: always() && env.SCCACHE_AVAILABLE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sccache-macos-aarch64
+          path: sccache-macos-aarch64.tar.gz
+          retention-days: 30
+
+      - name: 更新缓存索引
+        if: always() && env.SCCACHE_AVAILABLE == 'true' && steps.upload_artifact.outcome == 'success'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X DELETE "repos/${{ github.repository }}/actions/caches?key=sccache-macos-aarch64"
+        run: |
+          CACHE_KEY="sccache-macos-aarch64"
+          if [ -n "${PREV_ARTIFACT_ID:-}" ]; then
+            gh api -X DELETE \
+              "/repos/${{ github.repository }}/actions/artifacts/${PREV_ARTIFACT_ID}" \
+              && echo "✓ 已删除旧 Artifact" || true
+          fi
+          FILE_PATH="sccache/${CACHE_KEY}.runid"
+          CONTENT_B64=$(python3 -c "import base64; print(base64.b64encode('${{ github.run_id }}'.encode()).decode())")
+          FILE_SHA=$(gh api \
+            "/repos/${{ github.repository }}/contents/${FILE_PATH}?ref=i18n" \
+            --jq '.sha' 2>/dev/null || true)
+          if [ -n "$FILE_SHA" ]; then
+            gh api -X PUT "/repos/${{ github.repository }}/contents/${FILE_PATH}" \
+              -f message="chore: 更新 sccache 缓存索引 (${CACHE_KEY})" \
+              -f content="$CONTENT_B64" -f sha="$FILE_SHA" -f branch="i18n"
+          else
+            gh api -X PUT "/repos/${{ github.repository }}/contents/${FILE_PATH}" \
+              -f message="chore: 更新 sccache 缓存索引 (${CACHE_KEY})" \
+              -f content="$CONTENT_B64" -f branch="i18n"
+          fi
+          echo "✓ 缓存索引已更新 (Run ID: ${{ github.run_id }})"
 
-      - name: 保存 sccache 缓存
-        if: always() && env.SCCACHE_AVAILABLE == 'true'
+      - name: 保存 sccache 缓存（Artifact 失败时回退）
+        if: always() && env.SCCACHE_AVAILABLE == 'true' && steps.upload_artifact.outcome != 'success'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -838,6 +1070,8 @@ jobs:
       SCCACHE_IDLE_TIMEOUT: "0"
       BUILD_VERSION: ${{ needs.versioning.outputs.upstream_version }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: 安装 sccache
         continue-on-error: true
         uses: mozilla-actions/sccache-action@v0.0.3
@@ -864,8 +1098,38 @@ jobs:
       - name: 应用本地化补丁
         run: cd zed && git apply ../l10n.patch
 
-      - name: 恢复 sccache 缓存
+      - name: 从 Artifact 恢复 sccache 缓存
         if: env.SCCACHE_AVAILABLE == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CACHE_KEY="sccache-macos-x86_64"
+          PREV_RUN_ID=$(gh api \
+            "/repos/${{ github.repository }}/contents/sccache/${CACHE_KEY}.runid?ref=i18n" \
+            --jq '.content' 2>/dev/null | \
+            python3 -c "import base64,sys; print(base64.b64decode(sys.stdin.read()).decode().strip())" \
+            2>/dev/null || true)
+          [ -z "$PREV_RUN_ID" ] && echo "⚠ 无缓存索引，首次构建" && exit 0
+          ARTIFACT_ID=$(gh api \
+            "/repos/${{ github.repository }}/actions/runs/${PREV_RUN_ID}/artifacts" \
+            --jq ".artifacts[] | select(.name == \"${CACHE_KEY}\") | .id" 2>/dev/null || true)
+          [ -z "$ARTIFACT_ID" ] && echo "⚠ Artifact 不存在或已过期" && exit 0
+          echo "下载缓存 Artifact (ID: $ARTIFACT_ID)..."
+          curl -sL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            -o /tmp/sccache-cache.zip
+          unzip -p /tmp/sccache-cache.zip "${CACHE_KEY}.tar.gz" | \
+            tar -xzf - -C / 2>/dev/null || true
+          rm -f /tmp/sccache-cache.zip
+          echo "✓ 缓存已恢复（Artifact）"
+          echo "PREV_ARTIFACT_ID=${ARTIFACT_ID}" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_HIT=artifact" >> "$GITHUB_ENV"
+
+      - name: 从 Cache 恢复 sccache 缓存（Artifact 失败时回退）
+        if: env.SCCACHE_AVAILABLE == 'true' && env.SCCACHE_CACHE_HIT != 'artifact'
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -912,8 +1176,10 @@ jobs:
           ) &
           MONITOR_PID=$!
 
-          cd zed && cargo build --release --target x86_64-apple-darwin --jobs 4 --locked
+          set +e
+          python3 "$GITHUB_WORKSPACE/script/ci-build.py" --source-dir "$GITHUB_WORKSPACE/zed" --target x86_64-apple-darwin --jobs 4
           BUILD_EXIT=$?
+          set -e
 
           kill $MONITOR_PID 2>/dev/null || true
           PEAK_MEM=$(tail -n +2 "$MEM_LOG" | cut -d, -f2 | sort -n | tail -1)
@@ -943,15 +1209,57 @@ jobs:
           echo "========================================="
           sccache --stop-server || true
 
-      - name: 清理旧缓存
+      - name: 打包 sccache 缓存
         if: always() && env.SCCACHE_AVAILABLE == 'true'
+        run: |
+          CACHE_KEY="sccache-macos-x86_64"
+          tar -czf "${CACHE_KEY}.tar.gz" \
+            --ignore-failed-read \
+            -C / \
+            Users/runner/Library/Caches/Mozilla.sccache \
+            Users/runner/.cargo/registry \
+            Users/runner/.cargo/git 2>/dev/null || true
+          echo "缓存归档大小: $(du -sh ${CACHE_KEY}.tar.gz | cut -f1)"
+
+      - name: 上传 sccache 缓存 Artifact
+        id: upload_artifact
+        if: always() && env.SCCACHE_AVAILABLE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sccache-macos-x86_64
+          path: sccache-macos-x86_64.tar.gz
+          retention-days: 30
+
+      - name: 更新缓存索引
+        if: always() && env.SCCACHE_AVAILABLE == 'true' && steps.upload_artifact.outcome == 'success'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X DELETE "repos/${{ github.repository }}/actions/caches?key=sccache-macos-x86_64"
+        run: |
+          CACHE_KEY="sccache-macos-x86_64"
+          if [ -n "${PREV_ARTIFACT_ID:-}" ]; then
+            gh api -X DELETE \
+              "/repos/${{ github.repository }}/actions/artifacts/${PREV_ARTIFACT_ID}" \
+              && echo "✓ 已删除旧 Artifact" || true
+          fi
+          FILE_PATH="sccache/${CACHE_KEY}.runid"
+          CONTENT_B64=$(python3 -c "import base64; print(base64.b64encode('${{ github.run_id }}'.encode()).decode())")
+          FILE_SHA=$(gh api \
+            "/repos/${{ github.repository }}/contents/${FILE_PATH}?ref=i18n" \
+            --jq '.sha' 2>/dev/null || true)
+          if [ -n "$FILE_SHA" ]; then
+            gh api -X PUT "/repos/${{ github.repository }}/contents/${FILE_PATH}" \
+              -f message="chore: 更新 sccache 缓存索引 (${CACHE_KEY})" \
+              -f content="$CONTENT_B64" -f sha="$FILE_SHA" -f branch="i18n"
+          else
+            gh api -X PUT "/repos/${{ github.repository }}/contents/${FILE_PATH}" \
+              -f message="chore: 更新 sccache 缓存索引 (${CACHE_KEY})" \
+              -f content="$CONTENT_B64" -f branch="i18n"
+          fi
+          echo "✓ 缓存索引已更新 (Run ID: ${{ github.run_id }})"
 
-      - name: 保存 sccache 缓存
-        if: always() && env.SCCACHE_AVAILABLE == 'true'
+      - name: 保存 sccache 缓存（Artifact 失败时回退）
+        if: always() && env.SCCACHE_AVAILABLE == 'true' && steps.upload_artifact.outcome != 'success'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -1092,6 +1400,8 @@ jobs:
       BUILD_VERSION: ${{ needs.versioning.outputs.upstream_version }}
       LANG_LOWER: ${{ needs.versioning.outputs.lang_lower }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: 安装 sccache
         continue-on-error: true
         uses: mozilla-actions/sccache-action@v0.0.3
@@ -1116,8 +1426,8 @@ jobs:
             libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
             libxcb-randr0-dev libxcb-keysyms1-dev libxcb-util-dev \
             libgl1-mesa-dev libegl1-mesa-dev libfreetype6-dev libfontconfig1-dev \
-            libssl-dev libudev-dev libclang-dev clang cmake binutils-gold
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=gold -Clink-arg=-Wl,--no-threads" >> $GITHUB_ENV
+            libssl-dev libudev-dev libclang-dev clang cmake mold
+          echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
 
       - name: 克隆 Zed 源码并检出 Tag
         run: |
@@ -1136,8 +1446,38 @@ jobs:
           cd zed
           git apply ../l10n.patch
 
-      - name: 恢复 sccache 缓存
+      - name: 从 Artifact 恢复 sccache 缓存
         if: env.SCCACHE_AVAILABLE == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CACHE_KEY="sccache-linux-aarch64"
+          PREV_RUN_ID=$(gh api \
+            "/repos/${{ github.repository }}/contents/sccache/${CACHE_KEY}.runid?ref=i18n" \
+            --jq '.content' 2>/dev/null | \
+            python3 -c "import base64,sys; print(base64.b64decode(sys.stdin.read()).decode().strip())" \
+            2>/dev/null || true)
+          [ -z "$PREV_RUN_ID" ] && echo "⚠ 无缓存索引，首次构建" && exit 0
+          ARTIFACT_ID=$(gh api \
+            "/repos/${{ github.repository }}/actions/runs/${PREV_RUN_ID}/artifacts" \
+            --jq ".artifacts[] | select(.name == \"${CACHE_KEY}\") | .id" 2>/dev/null || true)
+          [ -z "$ARTIFACT_ID" ] && echo "⚠ Artifact 不存在或已过期" && exit 0
+          echo "下载缓存 Artifact (ID: $ARTIFACT_ID)..."
+          curl -sL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            -o /tmp/sccache-cache.zip
+          unzip -p /tmp/sccache-cache.zip "${CACHE_KEY}.tar.gz" | \
+            tar -xzf - -C / 2>/dev/null || true
+          rm -f /tmp/sccache-cache.zip
+          echo "✓ 缓存已恢复（Artifact）"
+          echo "PREV_ARTIFACT_ID=${ARTIFACT_ID}" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_HIT=artifact" >> "$GITHUB_ENV"
+
+      - name: 从 Cache 恢复 sccache 缓存（Artifact 失败时回退）
+        if: env.SCCACHE_AVAILABLE == 'true' && env.SCCACHE_CACHE_HIT != 'artifact'
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -1186,9 +1526,10 @@ jobs:
           ) &
           MONITOR_PID=$!
 
-          cd zed
-          cargo build --release --jobs 4 --locked
+          set +e
+          python3 "$GITHUB_WORKSPACE/script/ci-build.py" --source-dir "$GITHUB_WORKSPACE/zed" --jobs 4
           BUILD_EXIT=$?
+          set -e
 
           kill $MONITOR_PID 2>/dev/null || true
           echo "===== 内存监控摘要 ====="
@@ -1228,15 +1569,57 @@ jobs:
           echo ""
           sccache --stop-server || true
 
-      - name: 清理旧缓存
+      - name: 打包 sccache 缓存
         if: always() && env.SCCACHE_AVAILABLE == 'true'
+        run: |
+          CACHE_KEY="sccache-linux-aarch64"
+          tar -czf "${CACHE_KEY}.tar.gz" \
+            --ignore-failed-read \
+            -C / \
+            home/runner/.cache/sccache \
+            home/runner/.cargo/registry \
+            home/runner/.cargo/git 2>/dev/null || true
+          echo "缓存归档大小: $(du -sh ${CACHE_KEY}.tar.gz | cut -f1)"
+
+      - name: 上传 sccache 缓存 Artifact
+        id: upload_artifact
+        if: always() && env.SCCACHE_AVAILABLE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sccache-linux-aarch64
+          path: sccache-linux-aarch64.tar.gz
+          retention-days: 30
+
+      - name: 更新缓存索引
+        if: always() && env.SCCACHE_AVAILABLE == 'true' && steps.upload_artifact.outcome == 'success'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X DELETE "repos/${{ github.repository }}/actions/caches?key=sccache-linux-aarch64"
+        run: |
+          CACHE_KEY="sccache-linux-aarch64"
+          if [ -n "${PREV_ARTIFACT_ID:-}" ]; then
+            gh api -X DELETE \
+              "/repos/${{ github.repository }}/actions/artifacts/${PREV_ARTIFACT_ID}" \
+              && echo "✓ 已删除旧 Artifact" || true
+          fi
+          FILE_PATH="sccache/${CACHE_KEY}.runid"
+          CONTENT_B64=$(python3 -c "import base64; print(base64.b64encode('${{ github.run_id }}'.encode()).decode())")
+          FILE_SHA=$(gh api \
+            "/repos/${{ github.repository }}/contents/${FILE_PATH}?ref=i18n" \
+            --jq '.sha' 2>/dev/null || true)
+          if [ -n "$FILE_SHA" ]; then
+            gh api -X PUT "/repos/${{ github.repository }}/contents/${FILE_PATH}" \
+              -f message="chore: 更新 sccache 缓存索引 (${CACHE_KEY})" \
+              -f content="$CONTENT_B64" -f sha="$FILE_SHA" -f branch="i18n"
+          else
+            gh api -X PUT "/repos/${{ github.repository }}/contents/${FILE_PATH}" \
+              -f message="chore: 更新 sccache 缓存索引 (${CACHE_KEY})" \
+              -f content="$CONTENT_B64" -f branch="i18n"
+          fi
+          echo "✓ 缓存索引已更新 (Run ID: ${{ github.run_id }})"
 
-      - name: 保存 sccache 缓存
-        if: always() && env.SCCACHE_AVAILABLE == 'true'
+      - name: 保存 sccache 缓存（Artifact 失败时回退）
+        if: always() && env.SCCACHE_AVAILABLE == 'true' && steps.upload_artifact.outcome != 'success'
         uses: actions/cache/save@v4
         with:
           path: |
