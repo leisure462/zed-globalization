@@ -35,8 +35,6 @@ concurrency:
 env:
   ZED_REPO: https://github.com/zed-industries/zed.git
   # === 加速配置 ===
-  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
-  CARGO_PROFILE_RELEASE_DEBUG: "1"              # 降低 debuginfo 等级，节省磁盘空间
   RUSTC_WRAPPER: "sccache"
   CARGO_INCREMENTAL: "0"
   SCCACHE_RECACHE_THIRD_PARTY_DEPS: "1"
@@ -611,6 +609,8 @@ jobs:
           key: sccache-linux-x86_64
       - name: 打包 Linux
         run: |
+          objcopy --strip-debug zed/target/release/zed
+
           # === tar.gz 包 ===
           mkdir -p dist/usr/bin
           mkdir -p dist/usr/share/applications
@@ -1000,6 +1000,7 @@ jobs:
           chmod +x bins/aarch64/zed bins/x86_64/zed
           lipo -create bins/aarch64/zed bins/x86_64/zed -output zed-universal
           echo "Universal binary 架构: $(lipo -archs zed-universal)"
+          strip -x zed-universal
 
           APP_NAME="ZedG.app"
           mkdir -p "$APP_NAME/Contents/MacOS" "$APP_NAME/Contents/Resources"
@@ -1246,6 +1247,8 @@ jobs:
 
       - name: 打包 Linux ARM64
         run: |
+          objcopy --strip-debug zed/target/release/zed
+
           mkdir -p dist/usr/bin
           mkdir -p dist/usr/share/applications
           mkdir -p dist/usr/share/icons/hicolor/512x512/apps
