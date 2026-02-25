@@ -2292,7 +2292,12 @@
         "code-crease": "code-crease",
         "code-crease-toggle": "code-crease-切换",
         "Claude Agent": "",
-        "not supported by Claude Agent": ""
+        "not supported by Claude Agent": "",
+        "file.txt": "",
+        "content": "",
+        "AAAAAAAAAAAAAAAAAAAAAAAAA     AAAAAAAAAAAAAAAAAAAAAAAAA": "",
+        "[@f](file:///test.txt)": "",
+        "Expected mention link to be pasted, got: {}": "预期应粘贴提及链接,但得到: {}"
     },
     "zed/crates/agent_ui/src/acp/mode_selector.rs": {
         "Failed to set session mode: {:?}": "设置会话模式失败: {:?}",
@@ -25536,7 +25541,8 @@
         "Copilot should be disabled after disable_ai is set to true": "",
         "Copilot should be disabled initially": "",
         "Copilot should remain disabled when disable_ai is true": "",
-        "Copilot should be starting after disable_ai is set to false": ""
+        "Copilot should be starting after disable_ai is set to false": "",
+        "buffer not registered": "缓冲区未注册"
     },
     "zed/crates/copilot/src/copilot_edit_prediction_delegate.rs": {
         "copilot": "",
@@ -29380,7 +29386,8 @@
         "A\\tBC\\t": "",
         "TabStopCursor output mismatch for distance {}. Input: {:?}": "距离 {} 的 TabStopCursor 输出不匹配。输入: {:?}",
         "Cursor final position {} is before last tab stop {}. Input: {:?}": "光标最终位置 {} 在最后一个制表位 {} 之前。输入: {:?}",
-        "\\r\\t😁foo\\tb😀arbar🤯bar\\t\\tbaz\\n": ""
+        "\\r\\t😁foo\\tb😀arbar🤯bar\\t\\tbaz\\n": "",
+        "\\thello": ""
     },
     "zed/crates/editor/src/display_map/wrap_map.rs": {
         "this wrap row is a tab row": "",
@@ -57880,7 +57887,8 @@
         "new tile": "",
         "Failed to allocate from newly created texture": "无法从新创建的纹理分配",
         "atlas": "",
-        "texture must exist": ""
+        "texture must exist": "",
+        "failed to allocate": "分配失败"
     },
     "zed/crates/gpui/src/platform/wgpu/wgpu_context.rs": {
         "ZED_DEVICE_ID": "",
