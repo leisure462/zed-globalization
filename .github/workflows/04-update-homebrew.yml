@@ -64,29 +64,36 @@ jobs:
         run: |
           TAG="$TARGET_TAG"
           for i in $(seq 1 20); do
-            URL=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
-              | jq -r '.assets[] | select(.name | test("macos.*\\.dmg")) | .browser_download_url' \
-              | head -1)
-            if [ -n "$URL" ] && [ "$URL" != "null" ]; then
-              echo "找到产物: $URL"
-              echo "ASSET_URL=$URL" >> $GITHUB_ENV
+            RELEASE_JSON=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG")
+            URL_ARM=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | test("macos-aarch64.*\\.dmg")) | .browser_download_url' | head -1)
+            URL_X86=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | test("macos-x86_64.*\\.dmg")) | .browser_download_url' | head -1)
+            if [ -n "$URL_ARM" ] && [ "$URL_ARM" != "null" ] && \
+               [ -n "$URL_X86" ] && [ "$URL_X86" != "null" ]; then
+              echo "aarch64: $URL_ARM"
+              echo "x86_64:  $URL_X86"
+              echo "ASSET_URL_ARM=$URL_ARM" >> $GITHUB_ENV
+              echo "ASSET_URL_X86=$URL_X86" >> $GITHUB_ENV
               break
             fi
             echo "[$i/20] 产物未就绪，等待 15s..."
             sleep 15
           done
-          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
-            echo "::error::未找到 macOS DMG 产物"
+          if [ -z "$URL_ARM" ] || [ "$URL_ARM" = "null" ]; then
+            echo "::error::未找到 macOS 分架构 DMG 产物"
             exit 1
           fi
 
       - name: 下载并计算 Hash
         run: |
-          curl -L -o zedg-macos.dmg "$ASSET_URL"
-          HASH=$(sha256sum zedg-macos.dmg | awk '{print $1}')
-          echo "SHA256=$HASH" >> $GITHUB_ENV
-          echo "SHA256: $HASH"
-          rm zedg-macos.dmg
+          curl -L -o zedg-aarch64.dmg "$ASSET_URL_ARM"
+          curl -L -o zedg-x86_64.dmg  "$ASSET_URL_X86"
+          SHA256_ARM=$(sha256sum zedg-aarch64.dmg | awk '{print $1}')
+          SHA256_X86=$(sha256sum zedg-x86_64.dmg  | awk '{print $1}')
+          echo "SHA256_ARM=$SHA256_ARM" >> $GITHUB_ENV
+          echo "SHA256_X86=$SHA256_X86" >> $GITHUB_ENV
+          echo "aarch64 SHA256: $SHA256_ARM"
+          echo "x86_64  SHA256: $SHA256_X86"
+          rm zedg-aarch64.dmg zedg-x86_64.dmg
 
       - name: 生成 Homebrew Cask
         run: |
@@ -101,9 +108,16 @@ jobs:
             cat > "Casks/$out_file" <<CASK
           cask "$cask_name" do
             version "$CLEAN_VERSION"
-            sha256 "$SHA256"
 
-            url "$ASSET_URL"
+            on_arm do
+              url "$ASSET_URL_ARM"
+              sha256 "$SHA256_ARM"
+            end
+            on_intel do
+              url "$ASSET_URL_X86"
+              sha256 "$SHA256_X86"
+            end
+
             name "ZedG"
             desc "Zed Editor (Localized / 汉化版)$desc_suffix"
             homepage "https://github.com/$REPO"
@@ -172,9 +186,16 @@ jobs:
               cat > Casks/zedg-preview.rb <<CASK
           cask "zedg-preview" do
             version "$CLEAN_VERSION"
-            sha256 "$SHA256"
 
-            url "$ASSET_URL"
+            on_arm do
+              url "$ASSET_URL_ARM"
+              sha256 "$SHA256_ARM"
+            end
+            on_intel do
+              url "$ASSET_URL_X86"
+              sha256 "$SHA256_X86"
+            end
+
             name "ZedG"
             desc "Zed Editor (Localized / 汉化版) - Preview"
             homepage "https://github.com/$REPO"

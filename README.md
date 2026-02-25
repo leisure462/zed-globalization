@@ -14,10 +14,15 @@
 
 | 平台 | 文件 | 安装方式 |
 |------|------|---------|
-| macOS (Apple Silicon) | `zedg-zh-cn-macos-aarch64.dmg` | `brew tap x6nux/zedg && brew install --cask zedg`（[更多方式](#macos-安装)） |
-| Windows (x64) | `zedg-zh-cn-windows-x86_64.zip` | `scoop install zedg`（[更多方式](#windows-scoop-安装)） |
-| Linux (x64) | `zed-globalization-zh-cn-linux-x86_64.tar.gz` | 解压到 `/usr/local` |
-| Linux (x64 deb) | `zed-globalization-zh-cn-linux-x86_64.deb` | `sudo dpkg -i *.deb` |
+| macOS (Universal) | `zedg-zh-cn-macos-universal-*.dmg` | `brew tap x6nux/zedg && brew install --cask zedg`（自动按架构选包，[更多方式](#macos-安装)） |
+| macOS (Apple Silicon) | `zedg-zh-cn-macos-aarch64-*.dmg` | DMG 手动安装 |
+| macOS (Intel) | `zedg-zh-cn-macos-x86_64-*.dmg` | DMG 手动安装 |
+| Windows (x64) | `zedg-zh-cn-windows-x86_64-*.zip` | `scoop install zedg`（[更多方式](#windows-scoop-安装)） |
+| Windows (ARM64) | `zedg-zh-cn-windows-aarch64-*.zip` | 解压后运行 `ZedG.exe` |
+| Linux (x64) | `zedg-zh-cn-linux-x86_64-*.tar.gz` | 解压到 `/usr/local` |
+| Linux (x64 deb) | `zedg-zh-cn-linux-x86_64-*.deb` | `sudo dpkg -i *.deb` |
+| Linux (ARM64) | `zedg-zh-cn-linux-aarch64-*.tar.gz` | 解压到 `/usr/local` |
+| Linux (ARM64 deb) | `zedg-zh-cn-linux-aarch64-*.deb` | `sudo dpkg -i *.deb` |
 
 ### macOS 安装
 
@@ -54,7 +59,7 @@ brew install --cask zedg-preview
 
 **DMG 手动安装：**
 
-从 Releases 下载 DMG，打开后将 ZedG 拖入 Applications。由于构建未经 Apple 签名，首次打开会提示"应用已损坏"，在终端执行以下命令即可：
+从 Releases 下载 DMG（Universal Binary，同时支持 Apple Silicon 和 Intel），打开后将 ZedG 拖入 Applications。由于构建未经 Apple 签名，首次打开会提示"应用已损坏"，在终端执行以下命令即可：
 
 ```bash
 sudo xattr -rd com.apple.quarantine /Applications/ZedG.app

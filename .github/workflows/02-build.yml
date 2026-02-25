@@ -199,7 +199,7 @@ jobs:
   # ===========================================================================
   # 3. Windows 构建
   # ===========================================================================
-  build-windows:
+  build-windows-x86_64:
     needs: [versioning, prepare]
     if: ${{ needs.versioning.outputs.should_release == 'true' }}
     runs-on: windows-latest
@@ -311,6 +311,7 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          MSYS_NO_PATHCONV: 1
         shell: bash
         run: |
           CACHE_KEY="sccache-windows-x86_64"
@@ -461,6 +462,7 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          MSYS_NO_PATHCONV: 1
         shell: bash
         run: |
           CACHE_KEY="sccache-windows-x86_64"
@@ -509,9 +511,322 @@ jobs:
           path: zedg-${{ env.LANG_LOWER }}-windows-x86_64-${{ env.BUILD_VERSION }}.zip
 
   # ===========================================================================
+  # 3b. Windows ARM64 构建
+  # ===========================================================================
+  build-windows-aarch64:
+    needs: [versioning, prepare]
+    if: ${{ needs.versioning.outputs.should_release == 'true' }}
+    runs-on: windows-11-arm
+    env:
+      SCCACHE_DIR: C:\cc\sccache
+      SCCACHE_IDLE_TIMEOUT: "0"
+      BUILD_VERSION: ${{ needs.versioning.outputs.upstream_version }}
+      LANG_LOWER: ${{ needs.versioning.outputs.lang_lower }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 开启 Git Longpaths
+        run: git config --system core.longpaths true
+
+      - name: 设置工作目录
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\cc
+          New-Item -ItemType Directory -Force -Path C:\cc\sccache
+          New-Item -ItemType Directory -Force -Path C:\temp
+          echo "CARGO_HOME=C:\cc" >> $env:GITHUB_ENV
+          echo "TEMP=C:\temp" >> $env:GITHUB_ENV
+          echo "TMP=C:\temp" >> $env:GITHUB_ENV
+
+      - name: 克隆 Zed 源码并检出 Tag
+        shell: pwsh
+        run: |
+          git -c core.autocrlf=false clone ${{ env.ZED_REPO }} C:\z
+          Set-Location C:\z
+          git checkout $env:BUILD_VERSION
+          Write-Host "已切换到版本: $env:BUILD_VERSION"
+
+      - name: 下载本地化补丁
+        uses: actions/download-artifact@v4
+        with:
+          name: l10n-patch
+
+      - name: 应用本地化补丁
+        shell: bash
+        run: |
+          cd /c/z
+          git apply "$GITHUB_WORKSPACE/l10n.patch"
+
+      - name: 准备 Rust 环境
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup target add aarch64-pc-windows-msvc
+
+      - name: 安装 sccache
+        shell: pwsh
+        run: |
+          $installed = $false
+
+          # 方案1: choco 安装（最多重试 3 次）
+          if (Get-Command choco -ErrorAction SilentlyContinue) {
+            for ($i = 1; $i -le 3; $i++) {
+              Write-Host "Chocolatey 安装 sccache 尝试 $i/3..."
+              choco install sccache -y --no-progress 2>&1
+              if ($LASTEXITCODE -eq 0 -and (Get-Command sccache -ErrorAction SilentlyContinue)) {
+                Write-Host "choco 安装成功"
+                $installed = $true
+                break
+              }
+              Write-Host "第 $i 次安装失败 (exit=$LASTEXITCODE)"
+              if ($i -lt 3) { Write-Host "等待 30 秒后重试..."; Start-Sleep -Seconds 30 }
+            }
+          }
+
+          # 方案2: 直接从 GitHub Releases 下载 ARM64 版本
+          if (-not $installed) {
+            Write-Host "尝试从 GitHub Releases 直接下载 ARM64 版本..."
+            try {
+              $release = Invoke-RestMethod "https://api.github.com/repos/mozilla/sccache/releases/latest"
+              $asset = $release.assets | Where-Object {
+                $_.name -match "aarch64-pc-windows-msvc" -and $_.name -match "\.zip$"
+              } | Select-Object -First 1
+              if ($asset) {
+                Write-Host "下载: $($asset.browser_download_url)"
+                $zipPath = "C:\temp\sccache.zip"
+                $binDir  = "C:\temp\sccache-bin"
+                Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
+                Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
+                $sccacheExe = Get-ChildItem -Path $binDir -Filter "sccache.exe" -Recurse | Select-Object -First 1
+                if ($sccacheExe) {
+                  echo "$($sccacheExe.DirectoryName)" >> $env:GITHUB_PATH
+                  & "$($sccacheExe.FullName)" --version
+                  if ($LASTEXITCODE -eq 0) {
+                    Write-Host "GitHub Releases 安装成功"
+                    $installed = $true
+                  }
+                }
+              } else {
+                Write-Host "未找到 Windows ARM64 资产"
+              }
+            } catch {
+              Write-Host "GitHub Releases 下载失败: $_"
+            }
+          }
+
+          if ($installed) {
+            echo "SCCACHE_AVAILABLE=true" >> $env:GITHUB_ENV
+            Write-Host "✓ sccache 可用，将启用编译缓存"
+          } else {
+            echo "SCCACHE_AVAILABLE=false" >> $env:GITHUB_ENV
+            Write-Host "⚠ sccache 所有安装方式均失败，将不使用编译缓存"
+          }
+
+      - name: 从 Artifact 恢复 sccache 缓存
+        if: env.SCCACHE_AVAILABLE == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MSYS_NO_PATHCONV: 1
+        shell: bash
+        run: |
+          CACHE_KEY="sccache-windows-aarch64"
+          PREV_RUN_ID=$(gh api \
+            "/repos/${{ github.repository }}/contents/sccache/${CACHE_KEY}.runid?ref=i18n" \
+            --jq '.content' 2>/dev/null | \
+            python3 -c "import base64,sys; print(base64.b64decode(sys.stdin.read()).decode().strip())" \
+            2>/dev/null || true)
+          [ -z "$PREV_RUN_ID" ] && echo "⚠ 无缓存索引，首次构建" && exit 0
+          ARTIFACT_ID=$(gh api \
+            "/repos/${{ github.repository }}/actions/runs/${PREV_RUN_ID}/artifacts" \
+            --jq ".artifacts[] | select(.name == \"${CACHE_KEY}\") | .id" 2>/dev/null || true)
+          [ -z "$ARTIFACT_ID" ] && echo "⚠ Artifact 不存在或已过期" && exit 0
+          echo "下载缓存 Artifact (ID: $ARTIFACT_ID)..."
+          curl -sL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            -o /tmp/sccache-cache.zip
+          unzip -p /tmp/sccache-cache.zip "${CACHE_KEY}.tar.gz" | \
+            tar -xzf - -C /c/ 2>/dev/null || true
+          rm -f /tmp/sccache-cache.zip
+          echo "✓ 缓存已恢复（Artifact）"
+          echo "PREV_ARTIFACT_ID=${ARTIFACT_ID}" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_HIT=artifact" >> "$GITHUB_ENV"
+
+      - name: 从 Cache 恢复 sccache 缓存（Artifact 失败时回退）
+        if: env.SCCACHE_AVAILABLE == 'true' && env.SCCACHE_CACHE_HIT != 'artifact'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            C:\cc\sccache
+            C:\cc\registry
+            C:\cc\git
+          key: sccache-windows-aarch64
+          restore-keys: sccache-win
+
+      - name: 启动 sccache server
+        if: env.SCCACHE_AVAILABLE == 'true'
+        run: |
+          sccache --start-server
+          sccache --zero-stats
+
+      - name: 构建 Release (带重试)
+        shell: pwsh
+        env:
+          RELEASE_CHANNEL: stable
+        run: |
+          if ($env:SCCACHE_AVAILABLE -eq "true") {
+            $env:RUSTC_WRAPPER = "sccache"
+            Write-Host "已启用 sccache 编译缓存"
+          } else {
+            $env:RUSTC_WRAPPER = ""
+            Write-Host "⚠ sccache 不可用，直接编译（无缓存加速）"
+          }
+
+          $monitorJob = Start-Job -ScriptBlock {
+              $log = "C:\mem_monitor.csv"
+              "timestamp,used_mb,total_mb,swap_used_mb,swap_total_mb" | Out-File $log
+              while ($true) {
+                  $os = Get-CimInstance Win32_OperatingSystem
+                  $totalMB = [math]::Round($os.TotalVisibleMemorySize / 1024)
+                  $freeMB  = [math]::Round($os.FreePhysicalMemory / 1024)
+                  $usedMB  = $totalMB - $freeMB
+                  $swapTotalMB = [math]::Round(($os.SizeStoredInPagingFiles) / 1024)
+                  $swapFreeMB  = [math]::Round(($os.FreeSpaceInPagingFiles) / 1024)
+                  $swapUsedMB  = $swapTotalMB - $swapFreeMB
+                  $ts = Get-Date -Format "HH:mm:ss"
+                  "$ts,$usedMB,$totalMB,$swapUsedMB,$swapTotalMB" | Out-File $log -Append
+                  Start-Sleep -Seconds 10
+              }
+          }
+
+          python3 "$env:GITHUB_WORKSPACE\script\ci-build.py" --source-dir C:\z --target aarch64-pc-windows-msvc --jobs 4 --retries 3
+          $buildExit = $LASTEXITCODE
+
+          Stop-Job $monitorJob; Remove-Job $monitorJob
+          Write-Host "===== 内存监控摘要 ====="
+          if (Test-Path "C:\mem_monitor.csv") {
+              $csv = Import-Csv "C:\mem_monitor.csv"
+              if ($csv.Count -gt 0) {
+                  $peakMem  = ($csv | Measure-Object -Property used_mb -Maximum).Maximum
+                  $peakSwap = ($csv | Measure-Object -Property swap_used_mb -Maximum).Maximum
+                  $totalMem = $csv[0].total_mb
+                  Write-Host "物理内存: 峰值 ${peakMem}MB / 总计 ${totalMem}MB"
+                  Write-Host "交换内存: 峰值 ${peakSwap}MB"
+                  if ([int]$peakSwap -gt 0) { Write-Host "⚠ 编译期间使用了交换内存!" }
+                  Write-Host "采样记录数: $($csv.Count)"
+              } else {
+                  Write-Host "(no samples collected)"
+              }
+          } else {
+              Write-Host "(monitor did not produce data)"
+          }
+
+          if ($buildExit -ne 0) { exit $buildExit }
+
+      - name: 停止 sccache
+        if: env.SCCACHE_AVAILABLE == 'true'
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "========================================="
+          Write-Host "         sccache 编译缓存统计"
+          Write-Host "========================================="
+          $stats = sccache --show-stats 2>&1
+          $stats | Write-Host
+          Write-Host "-----------------------------------------"
+          $hits   = ($stats | Select-String "Cache hits\s+(\d+)" | ForEach-Object { $_.Matches[0].Groups[1].Value }) -as [int]
+          $misses = ($stats | Select-String "Cache misses\s+(\d+)" | ForEach-Object { $_.Matches[0].Groups[1].Value }) -as [int]
+          $total  = $hits + $misses
+          if ($total -gt 0) {
+              $rate = [math]::Round($hits / $total * 100, 1)
+              Write-Host ">>> 缓存命中: $hits / $total ($rate%)"
+              if ($rate -lt 30) { Write-Host ">>> ⚠ 命中率偏低，首次构建或缓存失效" }
+          } else {
+              Write-Host ">>> 无编译请求经过 sccache"
+          }
+          Write-Host "========================================="
+          Write-Host ""
+          sccache --stop-server || $true
+
+      - name: 打包 sccache 缓存
+        if: always() && env.SCCACHE_AVAILABLE == 'true'
+        shell: bash
+        run: |
+          CACHE_KEY="sccache-windows-aarch64"
+          tar -czf "${CACHE_KEY}.tar.gz" \
+            --ignore-failed-read \
+            -C /d \
+            c/sccache c/registry c/git 2>/dev/null || true
+          echo "缓存归档大小: $(du -sh ${CACHE_KEY}.tar.gz | cut -f1)"
+
+      - name: 上传 sccache 缓存 Artifact
+        id: upload_artifact
+        if: always() && env.SCCACHE_AVAILABLE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sccache-windows-aarch64
+          path: sccache-windows-aarch64.tar.gz
+          retention-days: 30
+
+      - name: 更新缓存索引
+        if: always() && env.SCCACHE_AVAILABLE == 'true' && steps.upload_artifact.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MSYS_NO_PATHCONV: 1
+        shell: bash
+        run: |
+          CACHE_KEY="sccache-windows-aarch64"
+          if [ -n "${PREV_ARTIFACT_ID:-}" ]; then
+            gh api -X DELETE \
+              "/repos/${{ github.repository }}/actions/artifacts/${PREV_ARTIFACT_ID}" \
+              && echo "✓ 已删除旧 Artifact" || true
+          fi
+          FILE_PATH="sccache/${CACHE_KEY}.runid"
+          CONTENT_B64=$(python3 -c "import base64; print(base64.b64encode('${{ github.run_id }}'.encode()).decode())")
+          FILE_SHA=$(gh api \
+            "/repos/${{ github.repository }}/contents/${FILE_PATH}?ref=i18n" \
+            --jq '.sha' 2>/dev/null || true)
+          if [ -n "$FILE_SHA" ]; then
+            gh api -X PUT "/repos/${{ github.repository }}/contents/${FILE_PATH}" \
+              -f message="chore: 更新 sccache 缓存索引 (${CACHE_KEY})" \
+              -f content="$CONTENT_B64" -f sha="$FILE_SHA" -f branch="i18n"
+          else
+            gh api -X PUT "/repos/${{ github.repository }}/contents/${FILE_PATH}" \
+              -f message="chore: 更新 sccache 缓存索引 (${CACHE_KEY})" \
+              -f content="$CONTENT_B64" -f branch="i18n"
+          fi
+          echo "✓ 缓存索引已更新 (Run ID: ${{ github.run_id }})"
+
+      - name: 保存 sccache 缓存（Artifact 失败时回退）
+        if: always() && env.SCCACHE_AVAILABLE == 'true' && steps.upload_artifact.outcome != 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            C:\cc\sccache
+            C:\cc\registry
+            C:\cc\git
+          key: sccache-windows-aarch64
+
+      - name: 打包 Windows ARM64
+        shell: pwsh
+        run: |
+          mkdir zed-dist
+          Copy-Item "C:\z\target\aarch64-pc-windows-msvc\release\zed.exe" zed-dist\ZedG.exe
+          Compress-Archive -Path zed-dist\* -DestinationPath "zedg-$env:LANG_LOWER-windows-aarch64-$env:BUILD_VERSION.zip"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: zed-windows-arm64
+          path: zedg-${{ env.LANG_LOWER }}-windows-aarch64-${{ env.BUILD_VERSION }}.zip
+
+  # ===========================================================================
   # 4. Linux 构建
   # ===========================================================================
-  build-linux:
+  build-linux-x86_64:
     needs: [versioning, prepare]
     if: ${{ needs.versioning.outputs.should_release == 'true' }}
     runs-on: ubuntu-latest
@@ -984,13 +1299,14 @@ jobs:
         if: always() && env.SCCACHE_AVAILABLE == 'true'
         run: |
           CACHE_KEY="sccache-macos-aarch64"
-          tar -czf "${CACHE_KEY}.tar.gz" \
-            --ignore-failed-read \
-            -C / \
-            Users/runner/Library/Caches/Mozilla.sccache \
-            Users/runner/.cargo/registry \
-            Users/runner/.cargo/git 2>/dev/null || true
-          echo "缓存归档大小: $(du -sh ${CACHE_KEY}.tar.gz | cut -f1)"
+          DIRS=()
+          [ -d "$HOME/Library/Caches/Mozilla.sccache" ] && DIRS+=("Users/runner/Library/Caches/Mozilla.sccache")
+          [ -d "$HOME/.cargo/registry" ] && DIRS+=("Users/runner/.cargo/registry")
+          [ -d "$HOME/.cargo/git" ]      && DIRS+=("Users/runner/.cargo/git")
+          if [ ${#DIRS[@]} -gt 0 ]; then
+            tar -czf "${CACHE_KEY}.tar.gz" -C / "${DIRS[@]}" 2>/dev/null || true
+          fi
+          echo "缓存归档大小: $(du -sh ${CACHE_KEY}.tar.gz 2>/dev/null | cut -f1 || echo '(未生成)')"
 
       - name: 上传 sccache 缓存 Artifact
         id: upload_artifact
@@ -1213,13 +1529,14 @@ jobs:
         if: always() && env.SCCACHE_AVAILABLE == 'true'
         run: |
           CACHE_KEY="sccache-macos-x86_64"
-          tar -czf "${CACHE_KEY}.tar.gz" \
-            --ignore-failed-read \
-            -C / \
-            Users/runner/Library/Caches/Mozilla.sccache \
-            Users/runner/.cargo/registry \
-            Users/runner/.cargo/git 2>/dev/null || true
-          echo "缓存归档大小: $(du -sh ${CACHE_KEY}.tar.gz | cut -f1)"
+          DIRS=()
+          [ -d "$HOME/Library/Caches/Mozilla.sccache" ] && DIRS+=("Users/runner/Library/Caches/Mozilla.sccache")
+          [ -d "$HOME/.cargo/registry" ] && DIRS+=("Users/runner/.cargo/registry")
+          [ -d "$HOME/.cargo/git" ]      && DIRS+=("Users/runner/.cargo/git")
+          if [ ${#DIRS[@]} -gt 0 ]; then
+            tar -czf "${CACHE_KEY}.tar.gz" -C / "${DIRS[@]}" 2>/dev/null || true
+          fi
+          echo "缓存归档大小: $(du -sh ${CACHE_KEY}.tar.gz 2>/dev/null | cut -f1 || echo '(未生成)')"
 
       - name: 上传 sccache 缓存 Artifact
         id: upload_artifact
@@ -1277,7 +1594,7 @@ jobs:
   # ===========================================================================
   # 5c. macOS 合并打包（Universal Binary + DMG）
   # ===========================================================================
-  build-macos:
+  build-macos-universal:
     needs: [versioning, build-macos-aarch64, build-macos-x86_64]
     if: ${{ needs.versioning.outputs.should_release == 'true' }}
     runs-on: macos-latest
@@ -1303,18 +1620,14 @@ jobs:
           name: zed-macos-resources
           path: resources
 
-      - name: 合并 Universal Binary 并打包 DMG
+      - name: 合并 Universal Binary 并打包 DMG（三份）
         run: |
           chmod +x bins/aarch64/zed bins/x86_64/zed
           lipo -create bins/aarch64/zed bins/x86_64/zed -output zed-universal
           echo "Universal binary 架构: $(lipo -archs zed-universal)"
-          strip -x zed-universal
+          strip -x bins/aarch64/zed bins/x86_64/zed zed-universal
 
-          APP_NAME="ZedG.app"
-          mkdir -p "$APP_NAME/Contents/MacOS" "$APP_NAME/Contents/Resources"
-          cp zed-universal "$APP_NAME/Contents/MacOS/zed"
-
-          # === 生成应用图标 (PNG -> ICNS) ===
+          # === 生成应用图标 ICNS（仅一次）===
           ICONSET_DIR="AppIcon.iconset"
           mkdir -p "$ICONSET_DIR"
           ICON_SRC="resources/app-icon@2x.png"
@@ -1329,68 +1642,73 @@ jobs:
             sips -z 512 512   "$ICON_SRC" --out "$ICONSET_DIR/icon_256x256@2x.png"
             sips -z 512 512   "$ICON_SRC" --out "$ICONSET_DIR/icon_512x512.png"
             cp "$ICON_SRC"         "$ICONSET_DIR/icon_512x512@2x.png"
-            iconutil -c icns "$ICONSET_DIR" -o "$APP_NAME/Contents/Resources/AppIcon.icns"
+            iconutil -c icns "$ICONSET_DIR" -o AppIcon.icns
             echo "应用图标已生成"
           else
             echo "未找到图标源文件 $ICON_SRC"
           fi
 
-          if [ -f "resources/Document.icns" ]; then
-            cp resources/Document.icns "$APP_NAME/Contents/Resources/"
-          fi
-
-          cat > "$APP_NAME/Contents/Info.plist" <<EOF
+          # === 公共函数：binary -> .app -> DMG ===
+          make_dmg() {
+            local BINARY="$1"
+            local DMG_NAME="$2"
+            local APP="ZedG-tmp.app"
+            mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+            cp "$BINARY" "$APP/Contents/MacOS/zed"
+            chmod +x "$APP/Contents/MacOS/zed"
+            [ -f AppIcon.icns ] && cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+            [ -f "resources/Document.icns" ] && cp resources/Document.icns "$APP/Contents/Resources/"
+            cat > "$APP/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-              <key>CFBundleExecutable</key>
-              <string>zed</string>
-              <key>CFBundleIdentifier</key>
-              <string>dev.zed.ZedG</string>
-              <key>CFBundleName</key>
-              <string>ZedG</string>
-              <key>CFBundleIconFile</key>
-              <string>AppIcon</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${{ needs.versioning.outputs.upstream_version }}</string>
+              <key>CFBundleExecutable</key><string>zed</string>
+              <key>CFBundleIdentifier</key><string>dev.zed.ZedG</string>
+              <key>CFBundleName</key><string>ZedG</string>
+              <key>CFBundleIconFile</key><string>AppIcon</string>
+              <key>CFBundlePackageType</key><string>APPL</string>
+              <key>CFBundleShortVersionString</key><string>${{ needs.versioning.outputs.upstream_version }}</string>
           </dict>
           </plist>
-          EOF
+          PLIST
+            local STAGING="dmg-staging-$$"
+            mkdir -p "$STAGING"
+            mv "$APP" "$STAGING/ZedG.app"
+            ln -s /Applications "$STAGING/Applications"
+            sleep 3
+            local n=0
+            until [ "$n" -ge 10 ]; do
+              hdiutil create -volname ZedG -srcfolder "$STAGING" -ov -format UDZO "$DMG_NAME" && break
+              n=$((n+1))
+              echo "hdiutil 失败, 等待 15 秒后重试 ($n/10)..."
+              sleep 15
+            done
+            rm -rf "$STAGING"
+            [ -f "$DMG_NAME" ] || { echo "打包 $DMG_NAME 失败"; exit 1; }
+            echo "✓ $DMG_NAME ($(du -sh "$DMG_NAME" | cut -f1))"
+          }
 
-          DMG_STAGING="dmg-staging"
-          mkdir -p "$DMG_STAGING"
-          mv "$APP_NAME" "$DMG_STAGING/"
-          ln -s /Applications "$DMG_STAGING/Applications"
-
-          echo "等待文件系统稳定 (10s)..."
-          sleep 10
-          echo "开始打包 DMG..."
-          n=0
-          until [ "$n" -ge 10 ]; do
-            hdiutil create -volname ZedG -srcfolder "$DMG_STAGING" -ov -format UDZO \
-              "zedg-${LANG_LOWER}-macos-universal-${BUILD_VERSION}.dmg" && break
-            n=$((n+1))
-            echo "hdiutil 失败 (Resource busy?), 等待 15 秒后重试 ($n/10)..."
-            sleep 15
-          done
-
-          if [ ! -f "zedg-${LANG_LOWER}-macos-universal-${BUILD_VERSION}.dmg" ]; then
-            echo "最终打包失败，退出。"; exit 1
-          fi
+          echo "=== 打包 Universal ==="
+          make_dmg zed-universal "zedg-${LANG_LOWER}-macos-universal-${BUILD_VERSION}.dmg"
+          echo "=== 打包 Apple Silicon (aarch64) ==="
+          make_dmg bins/aarch64/zed "zedg-${LANG_LOWER}-macos-aarch64-${BUILD_VERSION}.dmg"
+          echo "=== 打包 Intel (x86_64) ==="
+          make_dmg bins/x86_64/zed "zedg-${LANG_LOWER}-macos-x86_64-${BUILD_VERSION}.dmg"
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: zed-macos
-          path: zedg-${{ env.LANG_LOWER }}-macos-universal-${{ env.BUILD_VERSION }}.dmg
+          path: |
+            zedg-${{ env.LANG_LOWER }}-macos-universal-${{ env.BUILD_VERSION }}.dmg
+            zedg-${{ env.LANG_LOWER }}-macos-aarch64-${{ env.BUILD_VERSION }}.dmg
+            zedg-${{ env.LANG_LOWER }}-macos-x86_64-${{ env.BUILD_VERSION }}.dmg
 
   # ===========================================================================
   # 5d. Linux ARM64 构建
   # ===========================================================================
-  build-linux-arm64:
+  build-linux-aarch64:
     needs: [versioning, prepare]
     if: ${{ needs.versioning.outputs.should_release == 'true' }}
     runs-on: ubuntu-24.04-arm
@@ -1696,7 +2014,7 @@ jobs:
   # ===========================================================================
   release:
     runs-on: ubuntu-latest
-    needs: [versioning, build-windows, build-linux, build-linux-arm64, build-macos]
+    needs: [versioning, build-windows-x86_64, build-windows-aarch64, build-linux-x86_64, build-linux-aarch64, build-macos-universal]
     if: ${{ needs.versioning.outputs.should_release == 'true' }}
     env:
       LANG_LOWER: ${{ needs.versioning.outputs.lang_lower }}
@@ -1737,12 +2055,15 @@ jobs:
       - name: 整理文件与生成 Hash
         run: |
           mkdir release-dist
-          mv "artifacts/zed-windows/zedg-${LANG_LOWER}-windows-x86_64-${BUILD_VERSION}.zip" release-dist/ || echo "No Windows artifact"
+          mv "artifacts/zed-windows/zedg-${LANG_LOWER}-windows-x86_64-${BUILD_VERSION}.zip" release-dist/ || echo "No Windows x86_64 artifact"
+          mv "artifacts/zed-windows-arm64/zedg-${LANG_LOWER}-windows-aarch64-${BUILD_VERSION}.zip" release-dist/ || echo "No Windows ARM64 artifact"
           mv "artifacts/zed-linux/zedg-${LANG_LOWER}-linux-x86_64-${BUILD_VERSION}.tar.gz" release-dist/ || echo "No Linux x86_64 tar artifact"
           mv "artifacts/zed-linux/zedg-${LANG_LOWER}-linux-x86_64-${BUILD_VERSION}.deb" release-dist/ || echo "No Linux x86_64 deb artifact"
           mv "artifacts/zed-linux-arm64/zedg-${LANG_LOWER}-linux-aarch64-${BUILD_VERSION}.tar.gz" release-dist/ || echo "No Linux ARM64 tar artifact"
           mv "artifacts/zed-linux-arm64/zedg-${LANG_LOWER}-linux-aarch64-${BUILD_VERSION}.deb" release-dist/ || echo "No Linux ARM64 deb artifact"
-          mv "artifacts/zed-macos/zedg-${LANG_LOWER}-macos-universal-${BUILD_VERSION}.dmg" release-dist/ || echo "No macOS artifact"
+          mv "artifacts/zed-macos/zedg-${LANG_LOWER}-macos-universal-${BUILD_VERSION}.dmg" release-dist/ || echo "No macOS Universal artifact"
+          mv "artifacts/zed-macos/zedg-${LANG_LOWER}-macos-aarch64-${BUILD_VERSION}.dmg" release-dist/ || echo "No macOS aarch64 artifact"
+          mv "artifacts/zed-macos/zedg-${LANG_LOWER}-macos-x86_64-${BUILD_VERSION}.dmg" release-dist/ || echo "No macOS x86_64 artifact"
           mv "artifacts/l10n-patch/l10n.patch" "release-dist/zedg-${LANG_LOWER}-l10n-${BUILD_VERSION}.patch" || echo "No l10n patch"
           mv "artifacts/l10n-patch/l10n-source.tar.gz" "release-dist/zedg-${LANG_LOWER}-source-${BUILD_VERSION}.tar.gz" || echo "No l10n source"
 
