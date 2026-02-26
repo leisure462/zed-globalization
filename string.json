@@ -4484,6 +4484,14 @@
         "Should reject unnormalized cwd that resolves outside the project and use fallback cwd": "",
         "Do something harmful": "",
         "Expected refusal error to be set": "",
+        "Error Loading Codex CLI": "",
+        "Tab title should show the agent name with an error prefix": "",
+        "Invalid gzip header": "",
+        "Error callout should contain the underlying extraction error, got: {msg}": "",
+        "Expected LoadError::Other, got: {}": "",
+        "Loading (stuck!)": "",
+        "LoadError (wrong variant)": "",
+        "Connected": "",
         "Should be in Connected state even though auth is required": "",
         "Auth state should be Unauthenticated": "",
         "There should be no active thread since no session was created": "",
@@ -4513,6 +4521,7 @@
         "Notification should be closed when thread view is dropped": "",
         "Test": "",
         "Default response": "",
+        "Codex CLI": "",
         "resume-only": "",
         "ResumeOnlyAgentConnection": "",
         "new-session": "",
@@ -37843,7 +37852,7 @@
         "Dev container modal should be open after dispatching OpenDevContainer with multiple configs": ""
     },
     "zed/crates/recent_projects/src/remote_connections.rs": {
-        "no remote connection for existing remote workspace": "",
+        "existing remote workspace found but connection is dead, starting fresh connection": "",
         "fetching remote workspace position from db": "",
         "Failed to open project: {e:#}": "",
         "Failed to connect over SSH": "",
@@ -37874,7 +37883,12 @@
         "find_existing_workspace should return the same window": "",
         "second open_remote_project should succeed via reuse": "",
         "Second open should reuse the existing window, not create a new one": "",
-        "The window handle should be the same after reuse": ""
+        "The window handle should be the same after reuse": "",
+        "initial open should succeed": "",
+        "should have remote client": "",
+        "Reconnect": "",
+        "reconnect should succeed but got: {:?}": "",
+        "project should be remote after reconnect": ""
     },
     "zed/crates/recent_projects/src/remote_servers.rs": {
         "windows": "",
@@ -38115,6 +38129,7 @@
         "force_heartbeat_timeout: not in Connected state, ignoring": "",
         "connection was dropped": "",
         "missing test connection": "",
+        "fake_server_with_opts requires Mock connection options": "",
         "Connecting task is still alive": "",
         "Waiting for existing connection attempt": "",
         "Connecting task is dead, removing it and restarting a connection": "",

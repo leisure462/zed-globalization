@@ -2990,7 +2990,16 @@
         "Some prompt": "",
         "Max tokens reached": "",
         "Expected 'Max tokens reached' error, got: {}": "",
-        "Expected ThreadError::Other with 'Max tokens reached', got: {:?}": ""
+        "Expected ThreadError::Other with 'Max tokens reached', got: {:?}": "",
+        "Error Loading Codex CLI": "加载 Codex CLI 出错",
+        "Tab title should show the agent name with an error prefix": "",
+        "Invalid gzip header": "",
+        "Error callout should contain the underlying extraction error, got: {msg}": "",
+        "Expected LoadError::Other, got: {}": "",
+        "Loading (stuck!)": "",
+        "LoadError (wrong variant)": "",
+        "Connected": "",
+        "Codex CLI": ""
     },
     "zed/crates/agent_ui/src/agent_configuration/add_llm_provider_modal.rs": {
         "OpenAI": "",
@@ -13403,7 +13412,13 @@
         "find_existing_workspace should return the same window": "",
         "second open_remote_project should succeed via reuse": "",
         "Second open should reuse the existing window, not create a new one": "",
-        "The window handle should be the same after reuse": ""
+        "The window handle should be the same after reuse": "",
+        "existing remote workspace found but connection is dead, starting fresh connection": "",
+        "initial open should succeed": "",
+        "should have remote client": "",
+        "Reconnect": "重新连接",
+        "reconnect should succeed but got: {:?}": "",
+        "project should be remote after reconnect": ""
     },
     "zed/crates/recent_projects/src/remote_servers.rs": {
         "windows": "",
@@ -45343,7 +45358,8 @@
         "remote send name:{}": "",
         "failed to send message: {error}": "发送消息失败: {error}",
         "connection lost": "连接丢失",
-        "disconnected": ""
+        "disconnected": "",
+        "fake_server_with_opts requires Mock connection options": "fake_server_with_opts 需要 Mock 连接选项"
     },
     "zed/crates/remote/src/transport/mock.rs": {
         "mock-server": "",
