@@ -261,6 +261,7 @@ jobs:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_MODEL: ${{ secrets.AI_MODEL }}
           AI_CONCURRENCY: ${{ vars.AI_CONCURRENCY || '10' }}
+          AI_RETRY_EMPTY: ${{ vars.AI_RETRY_EMPTY || 'false' }}
           TARGET_LANG: ${{ steps.params.outputs.TARGET_LANG }}
           EXTRACT_MODE: ${{ steps.params.outputs.EXTRACT_MODE }}
         run: |

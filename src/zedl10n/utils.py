@@ -31,6 +31,7 @@ class AIConfig:
     api_key: str = ""
     model: str = ""
     concurrency: int = 10
+    retry_empty: bool = False
 
     def __post_init__(self) -> None:
         if not self.base_url:
@@ -44,6 +45,8 @@ class AIConfig:
         if self.concurrency <= 0:
             raw = os.environ.get("AI_CONCURRENCY", "10")
             self.concurrency = int(raw) if raw.isdigit() else 10
+        retry_raw = str(os.environ.get("AI_RETRY_EMPTY", "false")).strip().lower()
+        self.retry_empty = retry_raw in {"1", "true", "yes", "on"}
 
     def validate(self) -> None:
         """校验必填字段"""

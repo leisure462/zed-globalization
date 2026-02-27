@@ -425,10 +425,19 @@ async def _translate_async(
         result.setdefault(file_path, {})
         current = result[file_path]
         for s in strings:
-            # incremental 模式下：空译文也会进入翻译，避免历史失败条目长期漏翻
+            has_key = s in current
             has_value = bool(current.get(s))
-            need_translate = mode == "full" or not has_value
+            # 默认仅翻译缺失 key；可通过 AI_RETRY_EMPTY=true 开启空译文重翻。
+            need_translate = (
+                mode == "full"
+                or not has_key
+                or (ai_cfg.retry_empty and not has_value)
+            )
             if not need_translate:
+                if not has_value and s in translation_memory and translation_memory[s]:
+                    current[s] = translation_memory[s]
+                    reused_from_memory += 1
+                    continue
                 if s not in translation_memory and current.get(s):
                     translation_memory[s] = current[s]
                 continue
@@ -474,6 +483,9 @@ async def _translate_async(
         tasks.append(asyncio.create_task(do_batch()))
 
     total = len(tasks)
+    if mode != "full":
+        policy = "重翻空译文(已开启)" if ai_cfg.retry_empty else "仅翻译缺失 key(默认)"
+        log.info("增量翻译策略: %s", policy)
     log.info("共 %d 个翻译批次，并发数 %d", total, ai_cfg.concurrency)
     pbar = ProgressBar(total, desc="翻译")
 
