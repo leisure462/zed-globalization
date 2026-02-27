@@ -174,7 +174,12 @@ cd zed && cargo build --release
 | `AI_BASE_URL` | `--base-url` | API 地址 | `https://api.openai.com/v1` |
 | `AI_API_KEY` | `--api-key` | API 密钥 | 无（必填） |
 | `AI_MODEL` | `--model` | 模型名称 | `gpt-4o-mini` |
-| `AI_CONCURRENCY` | `--concurrency` | 并发数 | `5` |
+| `AI_CONCURRENCY` | `--concurrency` | 并发数（1-64） | `10` |
+| `AI_RETRY_EMPTY` | - | 是否在增量模式下重翻空译文（高消耗） | `false` |
+| `AI_REQUEST_TIMEOUT` | - | 单次请求超时秒数（10-600） | `120` |
+| `AI_CONSISTENCY_CHUNK_SIZE` | - | 一致性修复分块大小（1-100） | `12` |
+| `AI_CONSISTENCY_RETRIES` | - | 一致性修复单块重试次数（1-8） | `3` |
+| `AI_CONSISTENCY_DEBUG_RAW_LIMIT` | - | 一致性调试日志 raw 预览截断长度（200-20000） | `2000` |
 
 支持任何 OpenAI 兼容 API。优先级：CLI 参数 > 环境变量 > 默认值。
 

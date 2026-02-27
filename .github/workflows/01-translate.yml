@@ -35,6 +35,7 @@ permissions:
 
 env:
   ZED_REPO: https://github.com/zed-industries/zed.git
+  DEFAULT_TARGET_LANG: ${{ vars.DEFAULT_TARGET_LANG || 'zh-CN' }}
 
 jobs:
   # ====== 检测 Zed 是否发布新稳定版本（仅 Stable） ======
@@ -106,6 +107,7 @@ jobs:
     needs: check-version
     if: needs.check-version.outputs.has_update == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 240
     strategy:
       matrix: ${{ fromJSON(needs.check-version.outputs.matrix) }}
       max-parallel: 1 # 串行执行，避免 i18n 分支推送冲突
@@ -132,7 +134,7 @@ jobs:
         run: |
           # === 目标语言 ===
           INPUT_LANG="${{ inputs.target_lang }}"
-          TARGET_LANG="${INPUT_LANG:-zh-CN}"
+          TARGET_LANG="${INPUT_LANG:-${DEFAULT_TARGET_LANG:-zh-CN}}"
           echo "TARGET_LANG=$TARGET_LANG" >> $GITHUB_OUTPUT
           echo "目标语言: $TARGET_LANG"
 
@@ -255,6 +257,26 @@ jobs:
           extract_all(abs_files, "string.json", "string_context.json")
           PYEOF
 
+      - name: 校验 AI 配置
+        env:
+          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+        run: |
+          if [ -z "$AI_API_KEY" ]; then
+            echo "::error::未设置 AI_API_KEY secret"
+            exit 1
+          fi
+
+          if [ -n "$AI_BASE_URL" ]; then
+            case "$AI_BASE_URL" in
+              http://*|https://*) ;;
+              *)
+                echo "::error::AI_BASE_URL 必须以 http:// 或 https:// 开头"
+                exit 1
+                ;;
+            esac
+          fi
+
       - name: AI 翻译
         env:
           AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
@@ -262,6 +284,10 @@ jobs:
           AI_MODEL: ${{ secrets.AI_MODEL }}
           AI_CONCURRENCY: ${{ vars.AI_CONCURRENCY || '10' }}
           AI_RETRY_EMPTY: ${{ vars.AI_RETRY_EMPTY || 'false' }}
+          AI_REQUEST_TIMEOUT: ${{ vars.AI_REQUEST_TIMEOUT || '120' }}
+          AI_CONSISTENCY_CHUNK_SIZE: ${{ vars.AI_CONSISTENCY_CHUNK_SIZE || '12' }}
+          AI_CONSISTENCY_RETRIES: ${{ vars.AI_CONSISTENCY_RETRIES || '3' }}
+          AI_CONSISTENCY_DEBUG_RAW_LIMIT: ${{ vars.AI_CONSISTENCY_DEBUG_RAW_LIMIT || '2000' }}
           TARGET_LANG: ${{ steps.params.outputs.TARGET_LANG }}
           EXTRACT_MODE: ${{ steps.params.outputs.EXTRACT_MODE }}
         run: |
@@ -390,7 +416,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" == "schedule" ]; then
-            LANG_VALUE="zh-CN"
+            LANG_VALUE="${DEFAULT_TARGET_LANG:-zh-CN}"
           else
             LANG_VALUE="${{ steps.params.outputs.TARGET_LANG }}"
           fi

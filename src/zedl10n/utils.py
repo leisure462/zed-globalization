@@ -32,21 +32,57 @@ class AIConfig:
     model: str = ""
     concurrency: int = 10
     retry_empty: bool = False
+    request_timeout: int = 120
+    consistency_chunk_size: int = 12
+    consistency_fix_retries: int = 3
+    consistency_debug_raw_limit: int = 2000
+
+    @staticmethod
+    def _parse_int_env(
+        name: str, default: int, min_value: int, max_value: int,
+    ) -> int:
+        """从环境变量读取整数，非法值回退默认并做区间裁剪。"""
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        return max(min_value, min(max_value, value))
 
     def __post_init__(self) -> None:
         if not self.base_url:
-            self.base_url = os.environ.get(
-                "AI_BASE_URL", "https://api.openai.com/v1"
-            )
+            env_base = os.environ.get("AI_BASE_URL", "").strip()
+            self.base_url = env_base or "https://api.openai.com/v1"
         if not self.api_key:
             self.api_key = os.environ.get("AI_API_KEY", "")
         if not self.model:
-            self.model = os.environ.get("AI_MODEL", "gpt-4o-mini")
+            env_model = os.environ.get("AI_MODEL", "").strip()
+            self.model = env_model or "gpt-4o-mini"
         if self.concurrency <= 0:
-            raw = os.environ.get("AI_CONCURRENCY", "10")
-            self.concurrency = int(raw) if raw.isdigit() else 10
+            self.concurrency = self._parse_int_env(
+                "AI_CONCURRENCY", 10, 1, 64,
+            )
+        else:
+            self.concurrency = max(1, min(64, self.concurrency))
         retry_raw = str(os.environ.get("AI_RETRY_EMPTY", "false")).strip().lower()
         self.retry_empty = retry_raw in {"1", "true", "yes", "on"}
+        self.request_timeout = self._parse_int_env(
+            "AI_REQUEST_TIMEOUT", self.request_timeout, 10, 600,
+        )
+        self.consistency_chunk_size = self._parse_int_env(
+            "AI_CONSISTENCY_CHUNK_SIZE", self.consistency_chunk_size, 1, 100,
+        )
+        self.consistency_fix_retries = self._parse_int_env(
+            "AI_CONSISTENCY_RETRIES", self.consistency_fix_retries, 1, 8,
+        )
+        self.consistency_debug_raw_limit = self._parse_int_env(
+            "AI_CONSISTENCY_DEBUG_RAW_LIMIT",
+            self.consistency_debug_raw_limit,
+            200,
+            20000,
+        )
 
     def validate(self) -> None:
         """校验必填字段"""

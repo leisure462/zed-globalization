@@ -34,10 +34,6 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 
-CONSISTENCY_CHUNK_SIZE = 12
-CONSISTENCY_FIX_RETRIES = 3
-CONSISTENCY_DEBUG_RAW_LIMIT = 2000
-
 
 def _build_translation_memory(data: TranslationDict) -> dict[str, str]:
     """从已有翻译构建全局记忆库（原文 -> 译文）。"""
@@ -72,7 +68,17 @@ async def _call_ai(
         except Exception as e:
             if attempt < 4:
                 delay = (2**attempt) * 3 + random.uniform(0, 2)
-                log.debug("网络错误，等待 %.1fs 重试 (%d/5)", delay, attempt + 1)
+                err_name = type(e).__name__
+                err_msg = str(e).replace("\n", " ")
+                if len(err_msg) > 180:
+                    err_msg = f"{err_msg[:180]}..."
+                log.debug(
+                    "请求失败[%s] %s，等待 %.1fs 重试 (%d/5)",
+                    err_name,
+                    err_msg,
+                    delay,
+                    attempt + 1,
+                )
                 await asyncio.sleep(delay)
                 continue
             raise
@@ -214,7 +220,7 @@ def _read_source_file(file_path: str, source_root: str) -> str:
     return ""
 
 
-def _truncate_debug_text(raw: str, limit: int = CONSISTENCY_DEBUG_RAW_LIMIT) -> str:
+def _truncate_debug_text(raw: str, limit: int) -> str:
     """截断 AI 原始返回，避免调试日志过大。"""
     text = raw.strip()
     if len(text) <= limit:
@@ -226,7 +232,7 @@ def _chunk_consistency_issues(
     inconsistent: list[dict],
     glossary_violations: list[dict],
     keep_original_violations: list[dict],
-    chunk_size: int = CONSISTENCY_CHUNK_SIZE,
+    chunk_size: int,
 ) -> list[tuple[list[dict], list[dict], list[dict]]]:
     """将一致性问题拆分成多个小块，降低单次响应过长导致空返回的概率。"""
     items: list[tuple[str, dict]] = []
@@ -250,6 +256,9 @@ async def _ai_fix_consistency(
     system_prompt: str,
     result: TranslationDict,
     glossary_path: str,
+    chunk_size: int,
+    fix_retries: int,
+    debug_raw_limit: int,
     debug_records: list[dict[str, object]] | None = None,
 ) -> tuple[TranslationDict, list[str]]:
     """用 AI 修复一致性问题，返回 (修复后结果, 修复日志)"""
@@ -265,16 +274,16 @@ async def _ai_fix_consistency(
         return result, []
 
     fix_log: list[str] = []
-    chunks = _chunk_consistency_issues(incon, glossary_v, keep_v)
+    chunks = _chunk_consistency_issues(incon, glossary_v, keep_v, chunk_size)
     total_chunks = len(chunks)
     if total_chunks > 1:
-        log.info("一致性修复分块执行: %d 块（每块最多 %d 项）", total_chunks, CONSISTENCY_CHUNK_SIZE)
+        log.info("一致性修复分块执行: %d 块（每块最多 %d 项）", total_chunks, chunk_size)
 
     if debug_records is not None:
         debug_records.append({
             "event": "consistency_fix_start",
             "issues_total": len(issues),
-            "chunk_size": CONSISTENCY_CHUNK_SIZE,
+            "chunk_size": chunk_size,
             "total_chunks": total_chunks,
             "inconsistent": len(incon),
             "glossary_violations": len(glossary_v),
@@ -297,7 +306,7 @@ async def _ai_fix_consistency(
         fixed_chunk: dict[str, str] = {}
         request_failed = False
 
-        for attempt in range(1, CONSISTENCY_FIX_RETRIES + 1):
+        for attempt in range(1, fix_retries + 1):
             try:
                 raw = await _call_ai(client, model, system_prompt, user_prompt)
             except Exception as e:
@@ -307,7 +316,7 @@ async def _ai_fix_consistency(
                     chunk_idx,
                     total_chunks,
                     attempt,
-                    CONSISTENCY_FIX_RETRIES,
+                    fix_retries,
                     e,
                 )
                 if debug_records is not None:
@@ -319,7 +328,7 @@ async def _ai_fix_consistency(
                         "error_type": type(e).__name__,
                         "error": str(e),
                     })
-                if attempt < CONSISTENCY_FIX_RETRIES:
+                if attempt < fix_retries:
                     await asyncio.sleep(1.5 * attempt)
                 continue
 
@@ -331,7 +340,7 @@ async def _ai_fix_consistency(
                     "total_chunks": total_chunks,
                     "attempt": attempt,
                     "parsed_keys": len(parsed),
-                    "raw_preview": _truncate_debug_text(raw),
+                    "raw_preview": _truncate_debug_text(raw, debug_raw_limit),
                 })
 
             if parsed:
@@ -346,9 +355,9 @@ async def _ai_fix_consistency(
                 chunk_idx,
                 total_chunks,
                 attempt,
-                CONSISTENCY_FIX_RETRIES,
+                fix_retries,
             )
-            if attempt < CONSISTENCY_FIX_RETRIES:
+            if attempt < fix_retries:
                 await asyncio.sleep(1.5 * attempt)
 
         if fixed_chunk:
@@ -404,7 +413,12 @@ async def _translate_async(
     """异步并发翻译"""
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(base_url=ai_cfg.base_url, api_key=ai_cfg.api_key)
+    client = AsyncOpenAI(
+        base_url=ai_cfg.base_url,
+        api_key=ai_cfg.api_key,
+        timeout=ai_cfg.request_timeout,
+        max_retries=0,
+    )
     semaphore = asyncio.Semaphore(ai_cfg.concurrency)
 
     glossary_section = build_glossary_section(glossary_path)
@@ -568,6 +582,9 @@ async def _translate_async(
             system_prompt,
             result,
             glossary_path,
+            chunk_size=ai_cfg.consistency_chunk_size,
+            fix_retries=ai_cfg.consistency_fix_retries,
+            debug_raw_limit=ai_cfg.consistency_debug_raw_limit,
             debug_records=consistency_debug,
         )
         for msg in ai_fix_log:

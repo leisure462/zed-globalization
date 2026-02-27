@@ -12,7 +12,7 @@ def _add_ai_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--api-key", default="", help="AI API 密钥")
     parser.add_argument("--model", default="", help="AI 模型名称")
     parser.add_argument(
-        "--concurrency", type=int, default=0, help="AI 并发数（默认 5）"
+        "--concurrency", type=int, default=0, help="AI 并发数（默认 10）"
     )
 
 
