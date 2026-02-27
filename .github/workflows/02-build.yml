@@ -515,7 +515,7 @@ jobs:
   # ===========================================================================
   build-windows-aarch64:
     needs: [versioning, prepare]
-    if: ${{ needs.versioning.outputs.should_release == 'true' }}
+    if: ${{ false }} # Fork 定制：仅构建 Windows x86_64
     runs-on: windows-11-arm
     env:
       SCCACHE_DIR: C:\cc\sccache
@@ -828,7 +828,7 @@ jobs:
   # ===========================================================================
   build-linux-x86_64:
     needs: [versioning, prepare]
-    if: ${{ needs.versioning.outputs.should_release == 'true' }}
+    if: ${{ false }} # Fork 定制：仅构建 Windows x86_64
     runs-on: ubuntu-latest
     env:
       SCCACHE_DIR: /home/runner/.cache/sccache
@@ -1148,7 +1148,7 @@ jobs:
   # ===========================================================================
   build-macos-aarch64:
     needs: [versioning, prepare]
-    if: ${{ needs.versioning.outputs.should_release == 'true' }}
+    if: ${{ false }} # Fork 定制：仅构建 Windows x86_64
     runs-on: macos-latest
     env:
       SCCACHE_DIR: /Users/runner/Library/Caches/Mozilla.sccache
@@ -1379,7 +1379,7 @@ jobs:
   # ===========================================================================
   build-macos-x86_64:
     needs: [versioning, prepare]
-    if: ${{ needs.versioning.outputs.should_release == 'true' }}
+    if: ${{ false }} # Fork 定制：仅构建 Windows x86_64
     runs-on: macos-15-intel
     env:
       SCCACHE_DIR: /Users/runner/Library/Caches/Mozilla.sccache
@@ -1596,7 +1596,7 @@ jobs:
   # ===========================================================================
   build-macos-universal:
     needs: [versioning, build-macos-aarch64, build-macos-x86_64]
-    if: ${{ needs.versioning.outputs.should_release == 'true' }}
+    if: ${{ false }} # Fork 定制：仅构建 Windows x86_64
     runs-on: macos-latest
     env:
       BUILD_VERSION: ${{ needs.versioning.outputs.upstream_version }}
@@ -1710,7 +1710,7 @@ jobs:
   # ===========================================================================
   build-linux-aarch64:
     needs: [versioning, prepare]
-    if: ${{ needs.versioning.outputs.should_release == 'true' }}
+    if: ${{ false }} # Fork 定制：仅构建 Windows x86_64
     runs-on: ubuntu-24.04-arm
     env:
       SCCACHE_DIR: /home/runner/.cache/sccache
@@ -2014,7 +2014,7 @@ jobs:
   # ===========================================================================
   release:
     runs-on: ubuntu-latest
-    needs: [versioning, build-windows-x86_64, build-windows-aarch64, build-linux-x86_64, build-linux-aarch64, build-macos-universal]
+    needs: [versioning, build-windows-x86_64]
     if: ${{ needs.versioning.outputs.should_release == 'true' }}
     env:
       LANG_LOWER: ${{ needs.versioning.outputs.lang_lower }}
@@ -2081,7 +2081,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 触发 Scoop 和 Homebrew 更新
+      - name: 触发 Scoop 更新
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -2089,4 +2089,3 @@ jobs:
           IS_PRE="${{ needs.versioning.outputs.is_prerelease }}"
           echo "触发下游更新, 版本: $VERSION, pre-release: $IS_PRE"
           gh workflow run 03-update-scoop.yml -f version_tag="$VERSION" -f is_prerelease="$IS_PRE" || echo "⚠ 触发 Scoop 更新失败"
-          gh workflow run 04-update-homebrew.yml -f version_tag="$VERSION" -f is_prerelease="$IS_PRE" || echo "⚠ 触发 Homebrew 更新失败"

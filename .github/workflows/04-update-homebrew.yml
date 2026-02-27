@@ -30,9 +30,12 @@ jobs:
   update-cask:
     runs-on: ubuntu-latest
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'release' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.repository_owner == 'x6nux' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        github.event_name == 'release' ||
+        github.event.workflow_run.conclusion == 'success'
+      )
     steps:
       - name: 确定目标版本号
         run: |
