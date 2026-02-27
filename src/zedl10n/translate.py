@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import logging
 import random
+from collections import defaultdict
 from pathlib import Path
 
 from .batch import split_batch
@@ -32,6 +33,16 @@ from .utils import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _build_translation_memory(data: TranslationDict) -> dict[str, str]:
+    """从已有翻译构建全局记忆库（原文 -> 译文）。"""
+    memory: dict[str, str] = {}
+    for pairs in data.values():
+        for original, translated in pairs.items():
+            if original and translated:
+                memory[original] = translated
+    return memory
 
 
 async def _call_ai(
@@ -273,66 +284,138 @@ async def _translate_async(
     )
 
     result: TranslationDict = {fp: dict(v) for fp, v in existing.items()}
-    tasks: list[asyncio.Task] = []
-    failed_batches: list[dict[str, str | int]] = []
+    translation_memory = _build_translation_memory(existing) if mode != "full" else {}
+    source_locations: dict[str, set[str]] = defaultdict(set)
+    source_owner: dict[str, str] = {}
+    reused_from_memory = 0
 
+    # 先做全局去重：同一原文只翻译一次，然后分发到所有文件
     for file_path, strings in all_strings.items():
-        to_translate: dict[str, str] = {}
-        if file_path not in result:
-            result[file_path] = {}
+        result.setdefault(file_path, {})
+        current = result[file_path]
         for s in strings:
-            if mode == "full" or s not in result.get(file_path, {}):
-                to_translate[s] = ""
-        if not to_translate:
-            continue
+            # incremental 模式下：空译文也会进入翻译，避免历史失败条目长期漏翻
+            has_value = bool(current.get(s))
+            need_translate = mode == "full" or not has_value
+            if not need_translate:
+                if s not in translation_memory and current.get(s):
+                    translation_memory[s] = current[s]
+                continue
+
+            # 先尝试用翻译记忆直接复用，减少重复请求
+            if s in translation_memory and translation_memory[s]:
+                current[s] = translation_memory[s]
+                reused_from_memory += 1
+                continue
+
+            source_locations[s].add(file_path)
+            source_owner.setdefault(s, file_path)
+
+    owner_to_strings: dict[str, dict[str, str]] = {}
+    for source, owner in source_owner.items():
+        owner_to_strings.setdefault(owner, {})[source] = ""
+
+    if reused_from_memory:
+        log.info("翻译记忆复用 %d 条", reused_from_memory)
+
+    jobs: list[tuple[str, dict[str, str], str]] = []
+    for file_path, to_translate in owner_to_strings.items():
         raw_content = _read_source_file(file_path, source_root)
         batches, file_content = split_batch(
             to_translate, system_prompt, file_path, raw_content,
         )
         for batch in batches:
+            jobs.append((file_path, batch, file_content))
 
-            async def do_batch(
-                fp: str = file_path,
-                b: dict = batch,
-                fc: str = file_content,
-            ) -> tuple[str, dict[str, str], str | None, int]:
-                async with semaphore:
-                    translated, reason = await _translate_batch(
-                        client, ai_cfg.model, fp, b, fc, system_prompt,
-                    )
-                    return fp, translated, reason, len(b)
+    tasks: list[asyncio.Task] = []
+    for job_idx in range(len(jobs)):
 
-            tasks.append(asyncio.create_task(do_batch()))
+        async def do_batch(
+            idx: int = job_idx,
+        ) -> tuple[int, dict[str, str], str | None]:
+            fp, b, fc = jobs[idx]
+            async with semaphore:
+                translated, reason = await _translate_batch(
+                    client, ai_cfg.model, fp, b, fc, system_prompt,
+                )
+                return idx, translated, reason
+
+        tasks.append(asyncio.create_task(do_batch()))
 
     total = len(tasks)
     log.info("共 %d 个翻译批次，并发数 %d", total, ai_cfg.concurrency)
     pbar = ProgressBar(total, desc="翻译")
 
-    fail_count = 0
+    failed_first_round: dict[int, str] = {}
+
+    def apply_translations(translated_pairs: dict[str, str]) -> None:
+        for source, translated in translated_pairs.items():
+            if translated:
+                translation_memory[source] = translated
+            locations = source_locations.get(source)
+            if locations:
+                for fp in locations:
+                    result.setdefault(fp, {})[source] = translated
+
     for coro in asyncio.as_completed(tasks):
-        fp, translations, reason, batch_size = await coro
+        idx, translations, reason = await coro
+        fp, batch, _ = jobs[idx]
         if translations:
-            result.setdefault(fp, {}).update(translations)
+            apply_translations(translations)
         else:
-            fail_count += 1
-            failed_batches.append({
-                "file": fp,
-                "string_count": batch_size,
-                "reason": reason or "未知原因",
-            })
+            failed_first_round[idx] = reason or "未知原因"
             log.warning(
                 "批次失败 %d/%d: %s (%d 条) | %s",
-                fail_count,
+                len(failed_first_round),
                 total,
                 fp,
-                batch_size,
-                reason or "未知原因",
+                len(batch),
+                failed_first_round[idx],
             )
-        pbar.update(extra=f"失败 {fail_count}")
+        pbar.update(extra=f"失败 {len(failed_first_round)}")
     pbar.finish()
 
+    # 对失败批次做一次低并发重试，降低限流影响
+    if failed_first_round:
+        retry_ids = list(failed_first_round.keys())
+        log.info("开始重试失败批次: %d", len(retry_ids))
+        retry_pbar = ProgressBar(len(retry_ids), desc="重试")
+        recovered = 0
+        for idx in retry_ids:
+            fp, batch, file_content = jobs[idx]
+            translated, reason = await _translate_batch(
+                client, ai_cfg.model, fp, batch, file_content, system_prompt,
+            )
+            if translated:
+                apply_translations(translated)
+                recovered += 1
+                del failed_first_round[idx]
+            else:
+                failed_first_round[idx] = (
+                    f"{failed_first_round[idx]} | 重试后: {reason or '未知原因'}"
+                )
+            retry_pbar.update(extra=f"恢复 {recovered}")
+        retry_pbar.finish()
+        if recovered:
+            log.info("重试恢复成功 %d 批次", recovered)
+
+    failed_batches: list[dict[str, str | int]] = []
+    for idx, reason in failed_first_round.items():
+        fp, batch, _ = jobs[idx]
+        affected_files = len({
+            target_fp
+            for source in batch
+            for target_fp in source_locations.get(source, {fp})
+        })
+        failed_batches.append({
+            "file": fp,
+            "string_count": len(batch),
+            "affected_files": affected_files,
+            "reason": reason,
+        })
+
     if failed_batches:
-        log.warning("翻译阶段存在失败批次: %d/%d", len(failed_batches), total)
+        log.warning("翻译阶段仍有失败批次: %d/%d", len(failed_batches), total)
 
     # AI 一致性修复（最多 2 轮）
     for fix_round in range(2):

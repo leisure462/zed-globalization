@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import logging
 import re
+import string
+from collections import Counter
 from pathlib import Path
 
 from .utils import ContextDict, TranslationDict, save_json
@@ -16,6 +18,68 @@ _STRING_PATTERN = re.compile(r'"((?:\\.|[^"\\])*)"')
 
 # 排除包含 json_path: 的行
 _JSON_PATH_PATTERN = re.compile(r'json_path:\s*".*?"')
+_URL_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
+_PATH_PREFIX_PATTERN = re.compile(r"^(?:[A-Za-z]:[\\/]|/|\./|\.\./)")
+_HASH_PATTERN = re.compile(r"^[0-9a-fA-F]{8,}$")
+_VERSION_PATTERN = re.compile(r"^v?\d+(?:\.\d+){1,3}(?:[-._][A-Za-z0-9]+)?$")
+_PLACEHOLDER_ONLY_PATTERN = re.compile(
+    r"^(?:\s*(?:\{[^{}]*\}|%[-+#0-9.]*[a-zA-Z])\s*)+$",
+)
+_IDENTIFIER_PATTERN = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$",
+)
+
+
+def _is_translatable_string(s: str, line: str = "") -> tuple[bool, str]:
+    """过滤明显非 UI 字符串，返回 (是否保留, 原因)"""
+    text = s.strip()
+    if not text:
+        return False, "empty"
+
+    if all(ch in string.punctuation for ch in text):
+        return False, "punctuation_only"
+
+    if _URL_PATTERN.match(text):
+        return False, "url"
+
+    if _PATH_PREFIX_PATTERN.match(text):
+        return False, "path_like"
+
+    if "/" in text and " " not in text and text.count("/") >= 2:
+        return False, "path_like"
+
+    if text.startswith(("--", "-")) and " " not in text:
+        return False, "cli_flag"
+
+    if _PLACEHOLDER_ONLY_PATTERN.fullmatch(text):
+        return False, "placeholder_only"
+
+    if _HASH_PATTERN.fullmatch(text):
+        return False, "hash_like"
+
+    if _VERSION_PATTERN.fullmatch(text):
+        return False, "version_like"
+
+    if _IDENTIFIER_PATTERN.fullmatch(text) and ("_" in text or "::" in text):
+        return False, "code_identifier"
+
+    if text.isupper() and "_" in text:
+        return False, "const_like"
+
+    if "." in text and " " not in text and text.split(".")[-1] in {
+        "rs", "toml", "json", "yaml", "yml", "md", "txt", "lock", "dll", "exe",
+        "so", "dylib", "png", "jpg", "svg",
+    }:
+        return False, "file_like"
+
+    if (
+        "::" in line
+        and " " not in text
+        and any(token in line for token in ("match ", "=>", "enum ", "struct "))
+    ):
+        return False, "code_context"
+
+    return True, "keep"
 
 
 def extract_strings(content: str) -> list[str]:
@@ -32,15 +96,28 @@ def extract_with_context(
     lines = filtered.splitlines()
     strings: list[str] = []
     contexts: ContextDict = {}
+    skipped_reasons: Counter[str] = Counter()
 
     for i, line in enumerate(lines):
         for match in _STRING_PATTERN.finditer(line):
             s = match.group(1)
+            keep, reason = _is_translatable_string(s, line)
+            if not keep:
+                skipped_reasons[reason] += 1
+                continue
             strings.append(s)
             start = max(0, i - context_lines)
             end = min(len(lines), i + context_lines + 1)
             ctx_block = "\n".join(lines[start:end])
             contexts[s] = {"line": i + 1, "context": ctx_block}
+
+    if skipped_reasons:
+        total = sum(skipped_reasons.values())
+        top_reasons = ", ".join(
+            f"{reason}={count}"
+            for reason, count in skipped_reasons.most_common(4)
+        )
+        log.debug("过滤非 UI 字符串 %d 条 (%s)", total, top_reasons)
 
     return strings, contexts
 
