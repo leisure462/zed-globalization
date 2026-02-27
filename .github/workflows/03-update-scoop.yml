@@ -147,6 +147,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p bucket
 
           # 清理旧包名文件（从 zed-globalization 迁移到 zedg）
           if [ -f zed-globalization.json ]; then
@@ -155,32 +156,39 @@ jobs:
           if [ -f zed-globalization-preview.json ]; then
             git rm zed-globalization-preview.json
           fi
+          # 迁移旧的根目录 manifest 到标准 bucket 目录
+          if [ -f zedg.json ]; then
+            git rm zedg.json
+          fi
+          if [ -f zedg-preview.json ]; then
+            git rm zedg-preview.json
+          fi
 
           if [ "$IS_PRERELEASE" = "true" ]; then
             # Pre-release: 仅更新预览版
-            cp $GITHUB_WORKSPACE/zedg-preview.json .
-            git add zedg-preview.json
+            cp $GITHUB_WORKSPACE/zedg-preview.json bucket/zedg-preview.json
+            git add bucket/zedg-preview.json
             git diff --cached --quiet || git commit -m "chore(scoop): 预览版更新到 $VERSION"
           else
             # Stable release: 更新稳定版
-            cp $GITHUB_WORKSPACE/zedg.json .
-            git add zedg.json
+            cp $GITHUB_WORKSPACE/zedg.json bucket/zedg.json
+            git add bucket/zedg.json
 
             # 如果稳定版比预览版更新，同步更新预览版
             PREVIEW_VER=""
-            if [ -f zedg-preview.json ]; then
-              PREVIEW_VER=$(jq -r '.version' zedg-preview.json)
+            if [ -f bucket/zedg-preview.json ]; then
+              PREVIEW_VER=$(jq -r '.version' bucket/zedg-preview.json)
             fi
 
             if [ -z "$PREVIEW_VER" ] || \
                [ "$(printf '%s\n' "$CLEAN_VERSION" "$PREVIEW_VER" | sort -V | tail -1)" = "$CLEAN_VERSION" ] && \
                [ "$CLEAN_VERSION" != "$PREVIEW_VER" ]; then
               echo "稳定版 ($CLEAN_VERSION) 比预览版 ($PREVIEW_VER) 更新，同步更新预览版"
-              cp $GITHUB_WORKSPACE/zedg.json zedg-preview.json
+              cp $GITHUB_WORKSPACE/zedg.json bucket/zedg-preview.json
               # 修正 description 字段
-              jq '.description = "Zed Editor (Localized / 汉化版) - Preview"' zedg-preview.json > /tmp/preview.json
-              mv /tmp/preview.json zedg-preview.json
-              git add zedg-preview.json
+              jq '.description = "Zed Editor (Localized / 汉化版) - Preview"' bucket/zedg-preview.json > /tmp/preview.json
+              mv /tmp/preview.json bucket/zedg-preview.json
+              git add bucket/zedg-preview.json
             fi
 
             git diff --cached --quiet || git commit -m "chore(scoop): 更新到 $VERSION"
