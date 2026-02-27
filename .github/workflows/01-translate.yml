@@ -37,7 +37,7 @@ env:
   ZED_REPO: https://github.com/zed-industries/zed.git
 
 jobs:
-  # ====== 检测 Zed 是否发布新版本（同时检查 Stable 和 Pre-release） ======
+  # ====== 检测 Zed 是否发布新稳定版本（仅 Stable） ======
   check-version:
     runs-on: ubuntu-latest
     outputs:
@@ -50,11 +50,6 @@ jobs:
           STABLE_TAG=$(curl -s "https://api.github.com/repos/zed-industries/zed/releases/latest" \
             | jq -r '.tag_name // empty')
           echo "上游 Stable: ${STABLE_TAG:-无}"
-
-          # 获取上游最新 pre-release
-          PRE_TAG=$(curl -s "https://api.github.com/repos/zed-industries/zed/releases" \
-            | jq -r '[.[] | select(.prerelease==true and .draft==false)][0].tag_name // empty')
-          echo "上游 Pre-release: ${PRE_TAG:-无}"
 
           # 获取本地所有 release tag（最近 30 个，用于去重比对）
           LOCAL_TAGS=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases?per_page=30" \
@@ -79,29 +74,18 @@ jobs:
           INCLUDES="[]"
 
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # 手动触发：始终处理最新版本（含 pre-release）
-            LATEST_JSON=$(curl -s "https://api.github.com/repos/zed-industries/zed/releases?per_page=1")
-            V=$(echo "$LATEST_JSON" | jq -r '.[0].tag_name')
-            P=$(echo "$LATEST_JSON" | jq -r '.[0].prerelease')
-            INCLUDES=$(echo "$INCLUDES" | jq -c --arg v "$V" --arg p "$P" '. + [{"version": $v, "is_prerelease": $p}]')
-            echo "手动触发，处理版本: $V (pre-release: $P)"
+            # 手动触发：仅处理最新稳定版
+            V=$(curl -s "https://api.github.com/repos/zed-industries/zed/releases/latest" | jq -r '.tag_name')
+            INCLUDES=$(echo "$INCLUDES" | jq -c --arg v "$V" '. + [{"version": $v, "is_prerelease": "false"}]')
+            echo "手动触发，处理稳定版: $V"
           else
-            # 定时触发：分别检查 stable 和 pre-release
+            # 定时触发：仅检查 stable
             if [ -n "$STABLE_TAG" ] && [ "$STABLE_TAG" != "null" ]; then
               if ! is_built "$STABLE_TAG"; then
                 INCLUDES=$(echo "$INCLUDES" | jq -c --arg v "$STABLE_TAG" '. + [{"version": $v, "is_prerelease": "false"}]')
                 echo "发现新 Stable: $STABLE_TAG"
               else
                 echo "Stable $STABLE_TAG 已构建，跳过"
-              fi
-            fi
-
-            if [ -n "$PRE_TAG" ] && [ "$PRE_TAG" != "null" ] && [ "$PRE_TAG" != "$STABLE_TAG" ]; then
-              if ! is_built "$PRE_TAG"; then
-                INCLUDES=$(echo "$INCLUDES" | jq -c --arg v "$PRE_TAG" '. + [{"version": $v, "is_prerelease": "true"}]')
-                echo "发现新 Pre-release: $PRE_TAG"
-              else
-                echo "Pre-release $PRE_TAG 已构建，跳过"
               fi
             fi
           fi
@@ -155,7 +139,7 @@ jobs:
           # === 版本号 ===
           NEW_VER="${{ matrix.version }}"
           echo "VERSION=$NEW_VER" >> $GITHUB_OUTPUT
-          echo "构建版本: $NEW_VER (pre-release: ${{ matrix.is_prerelease }})"
+          echo "构建版本: $NEW_VER (stable)"
 
           # === 提取模式 ===
           INPUT_MODE="${{ inputs.mode }}"
@@ -413,4 +397,4 @@ jobs:
             -f event_type=build-ready \
             -f "client_payload[version]=${{ steps.params.outputs.VERSION }}" \
             -f "client_payload[lang]=$LANG_VALUE" \
-            -f "client_payload[is_prerelease]=${{ matrix.is_prerelease }}"
+            -f "client_payload[is_prerelease]=false"
