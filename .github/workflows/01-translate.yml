@@ -280,7 +280,7 @@ jobs:
           TARGET_LANG: ${{ steps.params.outputs.TARGET_LANG }}
           EXTRACT_MODE: ${{ steps.params.outputs.EXTRACT_MODE }}
         run: |
-          zedl10n translate \
+          zedl10n -v translate \
             --input string.json \
             --output "i18n/${TARGET_LANG}.json" \
             --context string_context.json \
@@ -288,6 +288,51 @@ jobs:
             --source-root zed \
             --mode "$EXTRACT_MODE" \
             --lang "$TARGET_LANG"
+
+      - name: 输出翻译失败摘要
+        if: always()
+        env:
+          TARGET_LANG: ${{ steps.params.outputs.TARGET_LANG }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os
+          from pathlib import Path
+
+          lang = os.environ.get("TARGET_LANG", "zh-CN")
+          log_path = Path(f"i18n/{lang}.json.failed_batches.json")
+          if not log_path.exists():
+              print("未生成失败批次日志（当前运行没有记录到失败批次，或翻译阶段提前退出）")
+              raise SystemExit(0)
+
+          data = json.loads(log_path.read_text(encoding="utf-8"))
+          total = data.get("total_batches", 0)
+          failed = data.get("failed_batches", 0)
+          rate = data.get("failure_rate", 0)
+          print(f"翻译失败摘要: 失败 {failed}/{total}, 失败率 {rate:.2%}")
+
+          items = data.get("items", [])
+          for idx, item in enumerate(items[:20], start=1):
+              file_path = item.get("file", "unknown")
+              count = item.get("string_count", 0)
+              reason = item.get("reason", "unknown")
+              print(f"{idx:02d}. {file_path} | strings={count} | reason={reason}")
+
+          remain = len(items) - 20
+          if remain > 0:
+              print(f"... 其余 {remain} 条请查看 artifacts 中的失败日志")
+          PYEOF
+
+      - name: 上传翻译调试日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: translate-debug-${{ matrix.version }}-${{ steps.params.outputs.TARGET_LANG }}
+          path: |
+            i18n/${{ steps.params.outputs.TARGET_LANG }}.json.failed_batches.json
+            string.json
+            string_context.json
+            scan_result.json
+          if-no-files-found: ignore
 
       - name: 清理不存在的文件条目
         env:

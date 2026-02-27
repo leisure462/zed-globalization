@@ -71,9 +71,11 @@ async def _fetch_translation(
     strings: dict[str, str],
     file_content: str,
     system_prompt: str,
-) -> dict[str, str]:
+) -> tuple[dict[str, str], str | None]:
     """通过 JSON → XML(CDATA) → 编号格式 三级降级获取翻译结果"""
     user_prompt = build_user_prompt(file_path, strings, file_content)
+    parse_failed = {"json": 0, "xml": 0, "numbered": 0}
+    last_error = ""
 
     # 第一级: JSON 格式重试 3 次
     for attempt in range(3):
@@ -81,10 +83,11 @@ async def _fetch_translation(
             raw = await _call_ai(client, model, system_prompt, user_prompt)
             result = parse_json_response(raw)
             if result:
-                return result
+                return result, None
+            parse_failed["json"] += 1
         except Exception as e:
-            log.warning("翻译失败 %s: %s", file_path, e)
-            return {}
+            last_error = f"JSON 请求失败: {type(e).__name__}: {e}"
+            log.warning("翻译失败 %s [JSON %d/3]: %s", file_path, attempt + 1, e)
 
     # 第二级: XML(CDATA) 格式重试 3 次
     xml_prompt = user_prompt + XML_FALLBACK_INSTRUCTION
@@ -93,11 +96,12 @@ async def _fetch_translation(
             raw = await _call_ai(client, model, system_prompt, xml_prompt)
             result = parse_xml_response(raw)
             if result:
-                return result
+                return result, None
+            parse_failed["xml"] += 1
             log.debug("XML 解析重试 (%d/3): %s", attempt + 1, file_path)
         except Exception as e:
-            log.warning("翻译失败 %s: %s", file_path, e)
-            return {}
+            last_error = f"XML 请求失败: {type(e).__name__}: {e}"
+            log.warning("翻译失败 %s [XML %d/3]: %s", file_path, attempt + 1, e)
 
     # 第三级: 编号格式重试 3 次
     keys = list(strings.keys())
@@ -107,18 +111,27 @@ async def _fetch_translation(
             raw = await _call_ai(client, model, system_prompt, numbered_prompt)
             result = parse_numbered_response(raw, keys)
             if result:
-                return result
+                return result, None
+            parse_failed["numbered"] += 1
             log.debug("编号格式解析重试 (%d/3): %s", attempt + 1, file_path)
         except Exception as e:
-            log.warning("翻译失败 %s: %s", file_path, e)
-            return {}
+            last_error = f"编号请求失败: {type(e).__name__}: {e}"
+            log.warning("翻译失败 %s [编号 %d/3]: %s", file_path, attempt + 1, e)
+
+    reason = (
+        "JSON 解析失败 {json} 次, XML 解析失败 {xml} 次, "
+        "编号解析失败 {numbered} 次"
+    ).format(**parse_failed)
+    if last_error:
+        reason = f"{reason}; 最后错误: {last_error}"
 
     log.warning(
-        "[FAILED] JSON+XML+编号 均失败: %s (%d 条)",
+        "[FAILED] JSON+XML+编号 均失败: %s (%d 条) | %s",
         file_path,
         len(strings),
+        reason,
     )
-    return {}
+    return {}, reason
 
 
 async def _translate_batch(
@@ -128,19 +141,19 @@ async def _translate_batch(
     strings: dict[str, str],
     file_content: str,
     system_prompt: str,
-) -> dict[str, str]:
+) -> tuple[dict[str, str], str | None]:
     """翻译一批字符串，含占位符校验和自动重试"""
-    result = await _fetch_translation(
+    result, failure_reason = await _fetch_translation(
         client, model, file_path, strings, file_content, system_prompt,
     )
     if not result:
-        return result
+        return result, failure_reason or "未返回可解析译文"
 
     # 占位符校验 + 重试（最多 2 次）
     for retry in range(2):
         errors = validate_placeholders(result)
         if not errors:
-            return result
+            return result, None
         log.debug(
             "占位符不匹配 %d 条，重试修正 (%d/2): %s",
             len(errors), retry + 1, file_path,
@@ -166,7 +179,7 @@ async def _translate_batch(
         )
         result[original] = ""
 
-    return result
+    return result, None
 
 
 def _read_source_file(file_path: str, source_root: str) -> str:
@@ -246,7 +259,7 @@ async def _translate_async(
     glossary_path: str,
     ai_cfg: AIConfig,
     source_root: str = "",
-) -> TranslationDict:
+) -> tuple[TranslationDict, list[dict[str, str | int]], int]:
     """异步并发翻译"""
     from openai import AsyncOpenAI
 
@@ -261,6 +274,7 @@ async def _translate_async(
 
     result: TranslationDict = {fp: dict(v) for fp, v in existing.items()}
     tasks: list[asyncio.Task] = []
+    failed_batches: list[dict[str, str | int]] = []
 
     for file_path, strings in all_strings.items():
         to_translate: dict[str, str] = {}
@@ -281,11 +295,12 @@ async def _translate_async(
                 fp: str = file_path,
                 b: dict = batch,
                 fc: str = file_content,
-            ) -> tuple[str, dict[str, str]]:
+            ) -> tuple[str, dict[str, str], str | None, int]:
                 async with semaphore:
-                    return fp, await _translate_batch(
+                    translated, reason = await _translate_batch(
                         client, ai_cfg.model, fp, b, fc, system_prompt,
                     )
+                    return fp, translated, reason, len(b)
 
             tasks.append(asyncio.create_task(do_batch()))
 
@@ -295,13 +310,29 @@ async def _translate_async(
 
     fail_count = 0
     for coro in asyncio.as_completed(tasks):
-        fp, translations = await coro
+        fp, translations, reason, batch_size = await coro
         if translations:
             result.setdefault(fp, {}).update(translations)
         else:
             fail_count += 1
+            failed_batches.append({
+                "file": fp,
+                "string_count": batch_size,
+                "reason": reason or "未知原因",
+            })
+            log.warning(
+                "批次失败 %d/%d: %s (%d 条) | %s",
+                fail_count,
+                total,
+                fp,
+                batch_size,
+                reason or "未知原因",
+            )
         pbar.update(extra=f"失败 {fail_count}")
     pbar.finish()
+
+    if failed_batches:
+        log.warning("翻译阶段存在失败批次: %d/%d", len(failed_batches), total)
 
     # AI 一致性修复（最多 2 轮）
     for fix_round in range(2):
@@ -313,7 +344,7 @@ async def _translate_async(
         if not ai_fix_log:
             break
 
-    return result
+    return result, failed_batches, total
 
 
 def translate_all(
@@ -334,7 +365,7 @@ def translate_all(
     all_strings: TranslationDict = load_json(strings_path)
     existing = load_json(output_path) if Path(output_path).exists() else {}
 
-    result = asyncio.run(
+    result, failed_batches, total_batches = asyncio.run(
         _translate_async(
             all_strings, existing, mode, lang,
             glossary_path, ai_cfg, source_root,
@@ -355,6 +386,35 @@ def translate_all(
 
     save_json(result, output_path)
     log.info("翻译结果已保存: %s", output_path)
+
+    if failed_batches:
+        failure_log_path = f"{output_path}.failed_batches.json"
+        by_file: dict[str, int] = {}
+        for item in failed_batches:
+            fp = str(item["file"])
+            by_file[fp] = by_file.get(fp, 0) + 1
+        file_summary = [
+            {"file": fp, "failed_batches": n}
+            for fp, n in sorted(by_file.items(), key=lambda x: x[1], reverse=True)
+        ]
+        save_json(
+            {
+                "total_batches": total_batches,
+                "failed_batches": len(failed_batches),
+                "failure_rate": round(
+                    len(failed_batches) / max(total_batches, 1), 4,
+                ),
+                "by_file": file_summary,
+                "items": failed_batches,
+            },
+            failure_log_path,
+        )
+        log.warning(
+            "失败批次详情已保存: %s (%d/%d)",
+            failure_log_path,
+            len(failed_batches),
+            total_batches,
+        )
 
 
 def run(args: argparse.Namespace) -> None:
