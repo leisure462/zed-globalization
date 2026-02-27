@@ -34,6 +34,10 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 
+CONSISTENCY_CHUNK_SIZE = 12
+CONSISTENCY_FIX_RETRIES = 3
+CONSISTENCY_DEBUG_RAW_LIMIT = 2000
+
 
 def _build_translation_memory(data: TranslationDict) -> dict[str, str]:
     """从已有翻译构建全局记忆库（原文 -> 译文）。"""
@@ -210,12 +214,43 @@ def _read_source_file(file_path: str, source_root: str) -> str:
     return ""
 
 
+def _truncate_debug_text(raw: str, limit: int = CONSISTENCY_DEBUG_RAW_LIMIT) -> str:
+    """截断 AI 原始返回，避免调试日志过大。"""
+    text = raw.strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}...(truncated, total={len(text)})"
+
+
+def _chunk_consistency_issues(
+    inconsistent: list[dict],
+    glossary_violations: list[dict],
+    keep_original_violations: list[dict],
+    chunk_size: int = CONSISTENCY_CHUNK_SIZE,
+) -> list[tuple[list[dict], list[dict], list[dict]]]:
+    """将一致性问题拆分成多个小块，降低单次响应过长导致空返回的概率。"""
+    items: list[tuple[str, dict]] = []
+    items.extend(("inconsistent", item) for item in inconsistent)
+    items.extend(("glossary", item) for item in glossary_violations)
+    items.extend(("keep_original", item) for item in keep_original_violations)
+
+    chunks: list[tuple[list[dict], list[dict], list[dict]]] = []
+    for i in range(0, len(items), max(1, chunk_size)):
+        part = items[i:i + max(1, chunk_size)]
+        chunk_incon = [item for kind, item in part if kind == "inconsistent"]
+        chunk_glossary = [item for kind, item in part if kind == "glossary"]
+        chunk_keep = [item for kind, item in part if kind == "keep_original"]
+        chunks.append((chunk_incon, chunk_glossary, chunk_keep))
+    return chunks or [([], [], [])]
+
+
 async def _ai_fix_consistency(
     client: object,
     model: str,
     system_prompt: str,
     result: TranslationDict,
     glossary_path: str,
+    debug_records: list[dict[str, object]] | None = None,
 ) -> tuple[TranslationDict, list[str]]:
     """用 AI 修复一致性问题，返回 (修复后结果, 修复日志)"""
     from .consistency import build_issues_for_ai, check_consistency
@@ -229,22 +264,112 @@ async def _ai_fix_consistency(
     if not incon and not glossary_v and not keep_v:
         return result, []
 
-    user_prompt = build_consistency_fix_prompt(incon, glossary_v, keep_v)
-
     fix_log: list[str] = []
-    try:
-        raw = await _call_ai(client, model, system_prompt, user_prompt)
-        fixed = parse_json_response(raw)
-    except Exception as e:
-        log.warning("AI 一致性修复请求失败: %s", e)
-        return result, fix_log
+    chunks = _chunk_consistency_issues(incon, glossary_v, keep_v)
+    total_chunks = len(chunks)
+    if total_chunks > 1:
+        log.info("一致性修复分块执行: %d 块（每块最多 %d 项）", total_chunks, CONSISTENCY_CHUNK_SIZE)
 
-    if not fixed:
-        log.warning("AI 一致性修复返回为空")
+    if debug_records is not None:
+        debug_records.append({
+            "event": "consistency_fix_start",
+            "issues_total": len(issues),
+            "chunk_size": CONSISTENCY_CHUNK_SIZE,
+            "total_chunks": total_chunks,
+            "inconsistent": len(incon),
+            "glossary_violations": len(glossary_v),
+            "keep_original_violations": len(keep_v),
+        })
+
+    merged_fixed: dict[str, str] = {}
+    empty_chunks = 0
+    failed_chunks = 0
+
+    for chunk_idx, (chunk_incon, chunk_glossary, chunk_keep) in enumerate(chunks, start=1):
+        user_prompt = build_consistency_fix_prompt(chunk_incon, chunk_glossary, chunk_keep)
+        user_prompt += (
+            "\n\n【强制要求】\n"
+            "1. 必须只返回一个合法 JSON 对象；禁止 markdown 代码块、禁止解释文字。\n"
+            "2. key 必须是原文，value 必须是修正后的译文。\n"
+            "3. 若本块无需修复，请返回 {}。"
+        )
+
+        fixed_chunk: dict[str, str] = {}
+        request_failed = False
+
+        for attempt in range(1, CONSISTENCY_FIX_RETRIES + 1):
+            try:
+                raw = await _call_ai(client, model, system_prompt, user_prompt)
+            except Exception as e:
+                request_failed = True
+                log.warning(
+                    "AI 一致性修复请求失败 (块 %d/%d, 重试 %d/%d): %s",
+                    chunk_idx,
+                    total_chunks,
+                    attempt,
+                    CONSISTENCY_FIX_RETRIES,
+                    e,
+                )
+                if debug_records is not None:
+                    debug_records.append({
+                        "event": "consistency_fix_request_error",
+                        "chunk_index": chunk_idx,
+                        "total_chunks": total_chunks,
+                        "attempt": attempt,
+                        "error_type": type(e).__name__,
+                        "error": str(e),
+                    })
+                if attempt < CONSISTENCY_FIX_RETRIES:
+                    await asyncio.sleep(1.5 * attempt)
+                continue
+
+            parsed = parse_json_response(raw)
+            if debug_records is not None:
+                debug_records.append({
+                    "event": "consistency_fix_response",
+                    "chunk_index": chunk_idx,
+                    "total_chunks": total_chunks,
+                    "attempt": attempt,
+                    "parsed_keys": len(parsed),
+                    "raw_preview": _truncate_debug_text(raw),
+                })
+
+            if parsed:
+                fixed_chunk = {
+                    k: v for k, v in parsed.items()
+                    if isinstance(k, str) and isinstance(v, str)
+                }
+                break
+
+            log.warning(
+                "AI 一致性修复返回为空 (块 %d/%d, 重试 %d/%d)",
+                chunk_idx,
+                total_chunks,
+                attempt,
+                CONSISTENCY_FIX_RETRIES,
+            )
+            if attempt < CONSISTENCY_FIX_RETRIES:
+                await asyncio.sleep(1.5 * attempt)
+
+        if fixed_chunk:
+            merged_fixed.update(fixed_chunk)
+        elif request_failed:
+            failed_chunks += 1
+        else:
+            empty_chunks += 1
+
+    if not merged_fixed:
+        log.warning(
+            "AI 一致性修复未产出可用结果（空返回块 %d，失败块 %d，共 %d 块）",
+            empty_chunks,
+            failed_chunks,
+            total_chunks,
+        )
         return result, fix_log
 
     # 将 AI 修正结果应用到所有文件
-    for original, new_translation in fixed.items():
+    unknown_keys = 0
+    for original, new_translation in merged_fixed.items():
         if not new_translation:
             continue
         applied = 0
@@ -258,6 +383,11 @@ async def _ai_fix_consistency(
                 f'AI 修复: "{original}" → "{new_translation}" '
                 f"(更新 {applied} 处)",
             )
+        else:
+            unknown_keys += 1
+
+    if unknown_keys:
+        log.debug("AI 一致性修复返回了 %d 条未命中原文 key，已忽略", unknown_keys)
 
     return result, fix_log
 
@@ -270,7 +400,7 @@ async def _translate_async(
     glossary_path: str,
     ai_cfg: AIConfig,
     source_root: str = "",
-) -> tuple[TranslationDict, list[dict[str, str | int]], int]:
+) -> tuple[TranslationDict, list[dict[str, str | int]], int, list[dict[str, object]]]:
     """异步并发翻译"""
     from openai import AsyncOpenAI
 
@@ -284,6 +414,7 @@ async def _translate_async(
     )
 
     result: TranslationDict = {fp: dict(v) for fp, v in existing.items()}
+    consistency_debug: list[dict[str, object]] = []
     translation_memory = _build_translation_memory(existing) if mode != "full" else {}
     source_locations: dict[str, set[str]] = defaultdict(set)
     source_owner: dict[str, str] = {}
@@ -420,14 +551,19 @@ async def _translate_async(
     # AI 一致性修复（最多 2 轮）
     for fix_round in range(2):
         result, ai_fix_log = await _ai_fix_consistency(
-            client, ai_cfg.model, system_prompt, result, glossary_path,
+            client,
+            ai_cfg.model,
+            system_prompt,
+            result,
+            glossary_path,
+            debug_records=consistency_debug,
         )
         for msg in ai_fix_log:
             log.info("一致性修复 (第 %d 轮): %s", fix_round + 1, msg)
         if not ai_fix_log:
             break
 
-    return result, failed_batches, total
+    return result, failed_batches, total, consistency_debug
 
 
 def translate_all(
@@ -448,7 +584,7 @@ def translate_all(
     all_strings: TranslationDict = load_json(strings_path)
     existing = load_json(output_path) if Path(output_path).exists() else {}
 
-    result, failed_batches, total_batches = asyncio.run(
+    result, failed_batches, total_batches, consistency_debug = asyncio.run(
         _translate_async(
             all_strings, existing, mode, lang,
             glossary_path, ai_cfg, source_root,
@@ -469,6 +605,17 @@ def translate_all(
 
     save_json(result, output_path)
     log.info("翻译结果已保存: %s", output_path)
+
+    if consistency_debug:
+        consistency_log_path = f"{output_path}.consistency_debug.json"
+        save_json(
+            {
+                "record_count": len(consistency_debug),
+                "records": consistency_debug,
+            },
+            consistency_log_path,
+        )
+        log.info("一致性修复调试日志已保存: %s", consistency_log_path)
 
     if failed_batches:
         failure_log_path = f"{output_path}.failed_batches.json"

@@ -313,6 +313,7 @@ jobs:
           name: translate-debug-${{ matrix.version }}-${{ steps.params.outputs.TARGET_LANG }}
           path: |
             i18n/${{ steps.params.outputs.TARGET_LANG }}.json.failed_batches.json
+            i18n/${{ steps.params.outputs.TARGET_LANG }}.json.consistency_debug.json
             string.json
             string_context.json
             scan_result.json
