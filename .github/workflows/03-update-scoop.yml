@@ -7,17 +7,22 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: "Release 版本号 (空则取最新)"
+        description: "Release 版本号（both 模式时忽略）"
         required: false
         type: string
-      is_prerelease:
-        description: "是否为 Pre-release"
+      mode:
+        description: "更新模式"
         required: false
-        default: "false"
-        type: string
+        default: "auto"
+        type: choice
+        options:
+          - auto       # 根据 version_tag 自动判断稳定/预览
+          - stable     # 仅更新稳定版
+          - prerelease # 仅更新预览版
+          - both       # 同时拉取最新稳定版和预览版并推送
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   update-bucket:
@@ -26,193 +31,149 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'release'
     steps:
-      - name: 确定目标版本号
+      - name: 生成并推送 Manifest
+        env:
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.version_tag }}
+          INPUT_MODE: ${{ inputs.mode }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          EVENT_IS_PRE: ${{ github.event.release.prerelease }}
+          SCOOP_PAT: ${{ secrets.TAP_GITHUB_TOKEN }}
         run: |
-          if [ -n "${{ inputs.version_tag }}" ]; then
-            echo "手动指定版本: ${{ inputs.version_tag }}"
-            echo "TARGET_TAG=${{ inputs.version_tag }}" >> $GITHUB_ENV
-          elif [ -n "${{ github.event.release.tag_name }}" ]; then
-            echo "Release 事件: ${{ github.event.release.tag_name }}"
-            echo "TARGET_TAG=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
-          else
-            TAG=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
-            echo "自动获取最新: $TAG"
-            echo "TARGET_TAG=$TAG" >> $GITHUB_ENV
-          fi
+          set -e
+          BUCKET_REPO="https://x-access-token:${SCOOP_PAT}@github.com/x6nux/scoop-zedg.git"
 
-      - name: 判断是否为 Pre-release
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            IS_PRE="${{ inputs.is_prerelease }}"
-          elif [ "${{ github.event_name }}" = "release" ]; then
-            IS_PRE="${{ github.event.release.prerelease }}"
-          else
-            IS_PRE=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TARGET_TAG" | jq -r '.prerelease // false')
-          fi
-          echo "IS_PRERELEASE=$IS_PRE" >> $GITHUB_ENV
-          echo "Pre-release: $IS_PRE"
+          # ── 等待并获取 Windows 产物 URL ────────────────────────────
+          fetch_assets() {
+            local tag="$1" i json
+            for i in $(seq 1 20); do
+              json=$(curl -s "https://api.github.com/repos/${GH_REPO}/releases/tags/$tag")
+              ASSET_X64=$(echo "$json" | jq -r '.assets[]|select(.name|test("windows-x86_64.*\\.zip"))|.browser_download_url')
+              ASSET_ARM64=$(echo "$json" | jq -r '.assets[]|select(.name|test("windows-aarch64.*\\.zip"))|.browser_download_url')
+              [ -n "$ASSET_X64" ] && [ "$ASSET_X64" != "null" ] && return 0
+              echo "[$i/20] $tag 产物未就绪，等待 15s..."; sleep 15
+            done
+            echo "::error::未找到 $tag 的 Windows x64 产物"; return 1
+          }
 
-      - name: 等待并获取 Windows 产物信息
-        run: |
-          TAG="$TARGET_TAG"
-          for i in $(seq 1 20); do
-            ASSETS_JSON=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG")
-            URL_X64=$(echo "$ASSETS_JSON" | jq -r '.assets[] | select(.name | test("windows-x86_64.*\\.zip")) | .browser_download_url')
-            URL_ARM64=$(echo "$ASSETS_JSON" | jq -r '.assets[] | select(.name | test("windows-aarch64.*\\.zip")) | .browser_download_url')
-            if [ -n "$URL_X64" ] && [ "$URL_X64" != "null" ]; then
-              echo "找到 x64 产物: $URL_X64"
-              echo "ASSET_URL_X64=$URL_X64" >> $GITHUB_ENV
-              [ -n "$URL_ARM64" ] && [ "$URL_ARM64" != "null" ] && echo "ASSET_URL_ARM64=$URL_ARM64" >> $GITHUB_ENV && echo "找到 arm64 产物: $URL_ARM64"
-              break
+          # ── 计算远程文件 SHA256 ────────────────────────────────────
+          remote_sha256() {
+            local tmp; tmp=$(mktemp)
+            curl -sL -o "$tmp" "$1"
+            sha256sum "$tmp" | awk '{print $1}'
+            rm "$tmp"
+          }
+
+          # ── 生成单个 manifest ──────────────────────────────────────
+          make_manifest() {
+            local tag="$1" is_pre="$2" out="$3"
+            local clean="${tag#v}"
+            local repo_url="https://github.com/${GH_REPO}"
+            local desc="Zed Editor (Localized / 汉化版)"
+            [ "$is_pre" = "true" ] && desc="$desc - Preview"
+
+            fetch_assets "$tag"
+            local hash_x64; hash_x64=$(remote_sha256 "$ASSET_X64")
+
+            # autoupdate 模板中 $version 是 Scoop 占位符，需对 shell 转义
+            local au_x64_url="${repo_url}/releases/download/v\$version/zedg-zh-cn-windows-x86_64-v\$version.zip"
+            local au_x64_hash="${repo_url}/releases/download/v\$version/sha256sums.txt"
+            local au_x64_regex='([a-f0-9]{64})\s+zedg-zh-cn-windows-x86_64-v\$version\.zip'
+
+            local manifest
+            manifest=$(jq -n \
+              --arg version  "$clean" \
+              --arg desc     "$desc" \
+              --arg homepage "$repo_url" \
+              --arg url_x64  "$ASSET_X64" \
+              --arg hash_x64 "$hash_x64" \
+              --arg au_url   "$au_x64_url" \
+              --arg au_hash  "$au_x64_hash" \
+              --arg au_regex "$au_x64_regex" \
+              '{
+                version: $version, description: $desc,
+                homepage: $homepage, license: "GPL-3.0-only",
+                architecture: {"64bit": {url: $url_x64, hash: $hash_x64}},
+                bin: "ZedG.exe", shortcuts: [["ZedG.exe", "ZedG"]],
+                checkver: {github: $homepage},
+                autoupdate: {architecture: {"64bit": {
+                  url: $au_url, hash: {url: $au_hash, regex: $au_regex}
+                }}}
+              }')
+
+            # 若有 ARM64 产物则追加
+            if [ -n "$ASSET_ARM64" ] && [ "$ASSET_ARM64" != "null" ]; then
+              local hash_arm64; hash_arm64=$(remote_sha256 "$ASSET_ARM64")
+              local au_arm64_url="${repo_url}/releases/download/v\$version/zedg-zh-cn-windows-aarch64-v\$version.zip"
+              local au_arm64_hash="${repo_url}/releases/download/v\$version/sha256sums.txt"
+              local au_arm64_regex='([a-f0-9]{64})\s+zedg-zh-cn-windows-aarch64-v\$version\.zip'
+              manifest=$(echo "$manifest" | jq \
+                --arg url   "$ASSET_ARM64" \
+                --arg hash  "$hash_arm64" \
+                --arg au_url   "$au_arm64_url" \
+                --arg au_hash  "$au_arm64_hash" \
+                --arg au_regex "$au_arm64_regex" \
+                '.architecture.arm64 = {url: $url, hash: $hash} |
+                 .autoupdate.architecture.arm64 = {url: $au_url, hash: {url: $au_hash, regex: $au_regex}}')
             fi
-            echo "[$i/20] 产物未就绪，等待 15s..."
-            sleep 15
-          done
-          if [ -z "$URL_X64" ] || [ "$URL_X64" = "null" ]; then
-            echo "::error::未找到 Windows x64 产物"
-            exit 1
-          fi
 
-      - name: 下载并计算 Hash
-        run: |
-          curl -L -o zed-win-x64.zip "$ASSET_URL_X64"
-          echo "SHA256_X64=$(sha256sum zed-win-x64.zip | awk '{print $1}')" >> $GITHUB_ENV
-          rm zed-win-x64.zip
-
-          if [ -n "$ASSET_URL_ARM64" ]; then
-            curl -L -o zed-win-arm64.zip "$ASSET_URL_ARM64"
-            echo "SHA256_ARM64=$(sha256sum zed-win-arm64.zip | awk '{print $1}')" >> $GITHUB_ENV
-            rm zed-win-arm64.zip
-          fi
-
-      - name: 生成 Manifest
-        run: |
-          VERSION="$TARGET_TAG"
-          CLEAN_VERSION="${VERSION#v}"
-          REPO="${{ github.repository }}"
-
-          ARM64_BLOCK=""
-          ARM64_AUTOUPDATE=""
-          if [ -n "$ASSET_URL_ARM64" ]; then
-            ARM64_BLOCK=$(cat <<ARMBLOCK
-              ,
-                  "arm64": {
-                      "url": "$ASSET_URL_ARM64",
-                      "hash": "$SHA256_ARM64"
-                  }
-          ARMBLOCK
-          )
-            ARM64_AUTOUPDATE=$(cat <<ARMAU
-              ,
-                      "arm64": {
-                          "url": "https://github.com/$REPO/releases/download/v\$version/zedg-zh-cn-windows-aarch64-v\$version.zip",
-                          "hash": {
-                              "url": "https://github.com/$REPO/releases/download/v\$version/sha256sums.txt",
-                              "regex": "([a-f0-9]{64})\\s+zedg-zh-cn-windows-aarch64-v\$version\\.zip"
-                          }
-                      }
-          ARMAU
-          )
-          fi
-
-          generate_manifest() {
-            local out="$1"
-            local desc_suffix="${2:+ - $2}"
-            cat > "$out" << MANIFEST
-          {
-              "version": "$CLEAN_VERSION",
-              "description": "Zed Editor (Localized / 汉化版)${desc_suffix}",
-              "homepage": "https://github.com/$REPO",
-              "license": "GPL-3.0-only",
-              "architecture": {
-                  "64bit": {
-                      "url": "$ASSET_URL_X64",
-                      "hash": "$SHA256_X64"
-                  }${ARM64_BLOCK}
-              },
-              "bin": "ZedG.exe",
-              "shortcuts": [["ZedG.exe", "ZedG"]],
-              "checkver": {
-                  "github": "https://github.com/$REPO"
-              },
-              "autoupdate": {
-                  "architecture": {
-                      "64bit": {
-                          "url": "https://github.com/$REPO/releases/download/v\$version/zedg-zh-cn-windows-x86_64-v\$version.zip",
-                          "hash": {
-                              "url": "https://github.com/$REPO/releases/download/v\$version/sha256sums.txt",
-                              "regex": "([a-f0-9]{64})\\s+zedg-zh-cn-windows-x86_64-v\$version\\.zip"
-                          }
-                      }${ARM64_AUTOUPDATE}
-                  }
-              }
-          }
-          MANIFEST
+            echo "$manifest" > "$out"
+            echo "已生成 $(basename "$out")：$tag (prerelease=$is_pre)"
           }
 
-          if [ "$IS_PRERELEASE" = "true" ]; then
-            echo "生成预览版 Manifest"
-            generate_manifest "zedg-preview.json" "Preview"
-          else
-            echo "生成稳定版 Manifest"
-            generate_manifest "zedg.json"
+          # ── 判断模式与目标版本 ─────────────────────────────────────
+          MODE="${INPUT_MODE:-auto}"
+          TARGET_TAG=""
+          IS_PRE="false"
+
+          if [ "$EVENT" = "release" ]; then
+            TARGET_TAG="$EVENT_TAG"
+            IS_PRE="$EVENT_IS_PRE"
+            MODE="auto"
           fi
 
-      - name: 推送 Manifest 到 scoop 分支
-        run: |
-          VERSION="$TARGET_TAG"
-          CLEAN_VERSION="${VERSION#v}"
+          mkdir -p /tmp/manifests
 
-          git init /tmp/scoop-branch
-          cd /tmp/scoop-branch
-          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-
-          if git ls-remote --heads origin scoop | grep -q scoop; then
-            git fetch origin scoop --depth 1
-            git checkout scoop
+          if [ "$MODE" = "both" ]; then
+            STABLE_TAG=$(curl -s "https://api.github.com/repos/${GH_REPO}/releases/latest" | jq -r .tag_name)
+            PRE_TAG=$(curl -s "https://api.github.com/repos/${GH_REPO}/releases?per_page=20" \
+              | jq -r '[.[]|select(.prerelease)][0].tag_name // empty')
+            echo "both 模式：stable=$STABLE_TAG  prerelease=${PRE_TAG:-（无）}"
+            make_manifest "$STABLE_TAG" "false" /tmp/manifests/zedg.json
+            [ -n "$PRE_TAG" ] && make_manifest "$PRE_TAG" "true" /tmp/manifests/zedg-preview.json
           else
-            git checkout -b scoop
+            if [ -z "$TARGET_TAG" ] && [ -n "$INPUT_TAG" ]; then
+              TARGET_TAG="$INPUT_TAG"
+              IS_PRE=$(curl -s "https://api.github.com/repos/${GH_REPO}/releases/tags/$TARGET_TAG" \
+                | jq -r '.prerelease // false')
+            elif [ -z "$TARGET_TAG" ]; then
+              TARGET_TAG=$(curl -s "https://api.github.com/repos/${GH_REPO}/releases/latest" | jq -r .tag_name)
+              IS_PRE="false"
+            fi
+            [ "$MODE" = "stable" ]     && IS_PRE="false"
+            [ "$MODE" = "prerelease" ] && IS_PRE="true"
+
+            if [ "$IS_PRE" = "true" ]; then
+              make_manifest "$TARGET_TAG" "true"  /tmp/manifests/zedg-preview.json
+            else
+              make_manifest "$TARGET_TAG" "false" /tmp/manifests/zedg.json
+            fi
           fi
 
+          # ── 推送到 x6nux/scoop-zedg ───────────────────────────────
+          git clone --depth 1 "$BUCKET_REPO" /tmp/scoop-zedg
+          cd /tmp/scoop-zedg
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 清理旧包名文件（从 zed-globalization 迁移到 zedg）
-          if [ -f zed-globalization.json ]; then
-            git rm zed-globalization.json
-          fi
-          if [ -f zed-globalization-preview.json ]; then
-            git rm zed-globalization-preview.json
-          fi
+          cp /tmp/manifests/*.json .
+          git add *.json
 
-          if [ "$IS_PRERELEASE" = "true" ]; then
-            # Pre-release: 仅更新预览版
-            cp $GITHUB_WORKSPACE/zedg-preview.json .
-            git add zedg-preview.json
-            git diff --cached --quiet || git commit -m "chore(scoop): 预览版更新到 $VERSION"
+          if git diff --cached --quiet; then
+            echo "Manifest 无变化，跳过推送"
           else
-            # Stable release: 更新稳定版
-            cp $GITHUB_WORKSPACE/zedg.json .
-            git add zedg.json
-
-            # 如果稳定版比预览版更新，同步更新预览版
-            PREVIEW_VER=""
-            if [ -f zedg-preview.json ]; then
-              PREVIEW_VER=$(jq -r '.version' zedg-preview.json)
-            fi
-
-            if [ -z "$PREVIEW_VER" ] || \
-               [ "$(printf '%s\n' "$CLEAN_VERSION" "$PREVIEW_VER" | sort -V | tail -1)" = "$CLEAN_VERSION" ] && \
-               [ "$CLEAN_VERSION" != "$PREVIEW_VER" ]; then
-              echo "稳定版 ($CLEAN_VERSION) 比预览版 ($PREVIEW_VER) 更新，同步更新预览版"
-              cp $GITHUB_WORKSPACE/zedg.json zedg-preview.json
-              # 修正 description 字段
-              jq '.description = "Zed Editor (Localized / 汉化版) - Preview"' zedg-preview.json > /tmp/preview.json
-              mv /tmp/preview.json zedg-preview.json
-              git add zedg-preview.json
-            fi
-
-            git diff --cached --quiet || git commit -m "chore(scoop): 更新到 $VERSION"
+            FILES=$(cd /tmp/manifests && ls ./*.json | xargs -I{} basename {} .json | tr '\n' ' ')
+            git commit -m "chore: 更新 ${FILES% }"
+            git push
           fi
-
-          git push origin scoop
