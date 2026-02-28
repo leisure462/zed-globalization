@@ -69,9 +69,9 @@ sudo xattr -rd com.apple.quarantine /Applications/ZedG.app
 
 **稳定版：**
 
-```bash
+```powershell
 # 首次安装
-scoop bucket add zedg https://github.com/x6nux/zed-globalization -b scoop
+scoop bucket add zedg https://github.com/x6nux/scoop-zedg
 scoop install zedg
 
 # 手动更新
@@ -80,8 +80,8 @@ scoop update zedg
 
 **预览版（Pre-release）：**
 
-```bash
-scoop bucket add zedg https://github.com/x6nux/zed-globalization -b scoop
+```powershell
+scoop bucket add zedg https://github.com/x6nux/scoop-zedg
 scoop install zedg-preview
 ```
 

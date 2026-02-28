@@ -47,15 +47,15 @@ sudo xattr -rd com.apple.quarantine /Applications/ZedG.app
 
 안정 버전:
 
-```bash
-scoop bucket add zedg https://github.com/x6nux/zed-globalization -b scoop
+```powershell
+scoop bucket add zedg https://github.com/x6nux/scoop-zedg
 scoop install zedg
 ```
 
 프리뷰 버전 (Pre-release):
 
-```bash
-scoop bucket add zedg https://github.com/x6nux/zed-globalization -b scoop
+```powershell
+scoop bucket add zedg https://github.com/x6nux/scoop-zedg
 scoop install zedg-preview
 ```
 
