@@ -52847,7 +52847,9 @@
         "# Title\\nˇ2. item\\n2. item\\n3. item": "",
         "j": "j",
         "# Title\\n2. item\\nˇ2. item\\n3. item": "",
-        "# Title\\n2. item\\nˇ3. item\\n3. item": ""
+        "# Title\\n2. item\\nˇ3. item\\n3. item": "",
+        "지ˇ1": "",
+        "지ˇ2": ""
     },
     "zed/crates/vim/src/normal/mark.rs": {
         "<": "",
@@ -57807,7 +57809,9 @@
         "̯": "",
         "̦": "",
         "ə": "",
-        "Ə": ""
+        "Ə": "",
+        "0x": "",
+        "Compositor GPU hint: vendor={:#06x}, device={:#06x} (from dev {major}:{minor})": "合成器 GPU 提示:供应商={:#06x},设备={:#06x}(来自设备 {major}:{minor})"
     },
     "zed/crates/gpui/src/platform/linux/text_system.rs": {
         "": "",
@@ -58485,7 +58489,20 @@
         "{:x}": "",
         "{:X}": "",
         "{:#x}": "",
-        "{:#X}": ""
+        "{:#X}": "",
+        "wasm": "",
+        "ZED_DEVICE_ID filter: {:#06x}": "ZED_DEVICE_ID 过滤器: {:#06x}",
+        "Other": "",
+        "Virtual": "",
+        "Found {} GPU adapter(s):": "找到 {} 个 GPU 适配器:",
+        "  - {} (vendor={:#06x}, device={:#06x}, backend={:?}, type={:?})": "  - {} (供应商={:#06x}, 设备={:#06x}, 后端={:?}, 类型={:?})",
+        "Testing adapter: {} ({:?})...": "正在测试适配器: {} ({:?})...",
+        "Selected GPU (passed configuration test): {} ({:?})": "已选择 GPU (通过配置测试): {} ({:?})",
+        "  Adapter {} ({:?}) failed: {}, trying next...": "  适配器 {} ({:?}) 失败: {}, 尝试下一个...",
+        "No GPU adapter found that can configure the display surface": "未找到能配置显示表面的 GPU 适配器",
+        "no compatible surface formats": "没有兼容的表面格式",
+        "no compatible alpha modes": "没有兼容的 Alpha 模式",
+        "surface configuration failed: {e}": "表面配置失败: {e}"
     },
     "zed/crates/gpui/src/platform/wgpu/wgpu_renderer.rs": {
         "Failed to get window handle: {e}": "获取窗口句柄失败: {e}",
@@ -58545,7 +58562,10 @@
         "size is at least 16": "大小至少为 16",
         "ZED_FONTS_GAMMA": "",
         "ZED_FONTS_GRAYSCALE_ENHANCED_CONTRAST": "",
-        "ZED_FONTS_SUBPIXEL_ENHANCED_CONTRAST": ""
+        "ZED_FONTS_SUBPIXEL_ENHANCED_CONTRAST": "",
+        "Failed to poll device during resize: {e:?}": "调整大小时轮询设备失败: {e:?}",
+        "GPU error during frame (failure {} of 20): {error}": "帧处理期间 GPU 错误 (第 {} 次失败,共 20 次): {error}",
+        "Too many consecutive GPU errors. Last error: {error}": "连续 GPU 错误过多。最后错误: {error}"
     },
     "zed/crates/gpui/src/platform/windows.rs": {
         "screen-capture": ""

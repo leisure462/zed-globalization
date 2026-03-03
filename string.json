@@ -13929,7 +13929,6 @@
         "toggle outline view": "",
         "Show Symbol Outline": "",
         "Right-Click to Copy Path": "",
-        "⏎": "",
         "buffer-header": "",
         "toggle-buffer-fold": "",
         "Unfold Excerpt": "",
@@ -19210,7 +19209,9 @@
         "Failed to open with dbus: {}": "",
         "Failed to open with {}: {}": "",
         "C": "",
-        "CursorStyle::None should be handled separately in the client": ""
+        "CursorStyle::None should be handled separately in the client": "",
+        "0x": "",
+        "Compositor GPU hint: vendor={:#06x}, device={:#06x} (from dev {major}:{minor})": ""
     },
     "zed/crates/gpui/src/platform/linux/text_system.rs": {
         "requested font family contains no font matching the other parameters": "",
@@ -19844,15 +19845,24 @@
         "texture must exist": ""
     },
     "zed/crates/gpui/src/platform/wgpu/wgpu_context.rs": {
+        "wasm": "",
         "Failed to parse device ID from `ZED_DEVICE_ID` environment variable": "",
         "Failed to read value of `ZED_DEVICE_ID` environment variable": "",
         "Selected GPU adapter: {:?} ({:?})": "",
         "Failed to create wgpu device: {e}": "",
         "No GPU adapters found": "",
-        "Found GPU matching ZED_DEVICE_ID={:#06x}: {}": "",
-        "No compatible GPU found matching ZED_DEVICE_ID={:#06x}. Available devices:": "",
-        "  - {} (device_id={:#06x}, backend={})": "",
-        "Failed to request GPU adapter: {e}": "",
+        "ZED_DEVICE_ID filter: {:#06x}": "",
+        "Other": "",
+        "Virtual": "",
+        "Found {} GPU adapter(s):": "",
+        "  - {} (vendor={:#06x}, device={:#06x}, backend={:?}, type={:?})": "",
+        "Testing adapter: {} ({:?})...": "",
+        "Selected GPU (passed configuration test): {} ({:?})": "",
+        "  Adapter {} ({:?}) failed: {}, trying next...": "",
+        "No GPU adapter found that can configure the display surface": "",
+        "no compatible surface formats": "",
+        "no compatible alpha modes": "",
+        "surface configuration failed: {e}": "",
         "0x": "",
         "0X": "",
         "Expected a 4 digit PCI ID in hexadecimal format": "",
@@ -19876,6 +19886,9 @@
         "paths": "",
         "underlines": "",
         "surfaces": "",
+        "Failed to poll device during resize: {e:?}": "",
+        "GPU error during frame (failure {} of 20): {error}": "",
+        "Too many consecutive GPU errors. Last error: {error}": "",
         "Failed to acquire surface texture: {e}": "",
         "instance buffer size grew too large: {}": "",
         "increased instance buffer size to {}": "",
@@ -40650,7 +40663,9 @@
         "# Title\\nˇ2. item\\n2. item\\n3. item": "",
         "j": "",
         "# Title\\n2. item\\nˇ2. item\\n3. item": "",
-        "# Title\\n2. item\\nˇ3. item\\n3. item": ""
+        "# Title\\n2. item\\nˇ3. item\\n3. item": "",
+        "지ˇ1": "",
+        "지ˇ2": ""
     },
     "zed/crates/vim/src/normal/mark.rs": {
         "ˇHello, world!": "",
