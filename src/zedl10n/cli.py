@@ -106,6 +106,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="禁止翻译列表 JSON 文件路径",
     )
 
+    # --- fix-placeholders ---
+    p_fix = sub.add_parser(
+        "fix-placeholders", help="AI 修复翻译中的占位符错误并清理无效文件",
+    )
+    p_fix.add_argument("--input", required=True, help="翻译 JSON 文件路径")
+    p_fix.add_argument(
+        "--source-root", default=".", help="Zed 源码根目录",
+    )
+    _add_ai_args(p_fix)
+
     # --- convert ---
     p_conv = sub.add_parser("convert", help="JSON <-> Excel 转换")
     p_conv_sub = p_conv.add_subparsers(dest="convert_action")
@@ -202,6 +212,10 @@ def main() -> None:
         run(args)
     elif args.command == "replace":
         from .replace import run
+
+        run(args)
+    elif args.command == "fix-placeholders":
+        from .fix_placeholders import run
 
         run(args)
     elif args.command == "convert":

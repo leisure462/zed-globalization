@@ -289,42 +289,16 @@ jobs:
             --mode "$EXTRACT_MODE" \
             --lang "$TARGET_LANG"
 
-      - name: 清理不存在的文件条目
+      - name: 修复占位符错误并清理无效条目
         env:
+          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
           TARGET_LANG: ${{ steps.params.outputs.TARGET_LANG }}
         run: |
-          python3 << 'PYEOF'
-          import json, os
-          from pathlib import Path
-
-          lang = os.environ.get("TARGET_LANG", "zh-CN")
-          trans_path = f"i18n/{lang}.json"
-
-          if not Path(trans_path).exists():
-              print("翻译文件不存在，跳过清理")
-              exit(0)
-
-          with open(trans_path, "r", encoding="utf-8") as f:
-              data = json.load(f)
-
-          root = Path("zed")
-          removed = []
-          for fp in list(data.keys()):
-              # 解析路径：zed/crates/xxx -> crates/xxx
-              rel = fp[4:] if fp.startswith("zed/") else fp
-              if not (root / rel).exists():
-                  removed.append(fp)
-                  del data[fp]
-
-          if removed:
-              with open(trans_path, "w", encoding="utf-8") as f:
-                  json.dump(data, f, ensure_ascii=False, indent=2)
-              print(f"已清理 {len(removed)} 个源码中不存在的文件条目:")
-              for r in removed[:20]:
-                  print(f"  - {r}")
-          else:
-              print("所有文件条目均存在于源码中，无需清理")
-          PYEOF
+          zedl10n fix-placeholders \
+            --input "i18n/${TARGET_LANG}.json" \
+            --source-root zed
 
       - name: 推送到 i18n 分支
         run: |
