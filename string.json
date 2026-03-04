@@ -12724,6 +12724,7 @@
     },
     "zed/crates/edit_prediction/src/edit_prediction.rs": {
         "zed_predict_data_collection_choice": "",
+        "Edit Prediction Settled": "",
         "zeta2": "",
         "edit_prediction_jumps": "",
         "untitled-{}": "",
@@ -12892,7 +12893,17 @@
         "expected a cross-file diagnostic location": "",
         "buffer should have a file": "",
         "root/free_file.txt": "",
-        "should skip collab_file.txt (has collaborator) and pick free_file.txt": ""
+        "should skip collab_file.txt (has collaborator) and pick free_file.txt": "",
+        "line {i:02}\\n": "",
+        "ADDED ": "",
+        "prediction-a": "",
+        "x": "",
+        "no settled events should fire while region A is still being edited": "",
+        "NEW ": "",
+        "prediction-b": "",
+        "neither prediction should have settled yet": "",
+        "only prediction A should have settled, got: {events:?}": "",
+        "both predictions should have settled, got: {events:?}": ""
     },
     "zed/crates/edit_prediction/src/example_spec.rs": {
         "[CURSOR_POSITION]": "",
