@@ -1,24 +1,29 @@
 {
-    "version": "0.226.1-pre",
-    "description": "Zed Editor (Localized / 汉化版) - Preview",
-    "homepage": "https://github.com/leisure462/zed-globalization",
-    "license": "GPL-3.0-only",
-    "architecture": {
-        "64bit": {
-            "url": "https://github.com/leisure462/zed-globalization/releases/download/v0.226.1-pre/zedg-zh-cn-windows-aarch64-v0.226.1-pre.zip",
-            "hash": "0d47a970529af8cb9bd56a15683eb572c6f8401cfe64fcdd92f2b6e4ddb4ea72"
-        }
-    },
-    "bin": "ZedG.exe",
-    "shortcuts": [["ZedG.exe", "ZedG"]],
-    "checkver": {
-        "github": "https://github.com/leisure462/zed-globalization"
-    },
-    "autoupdate": {
-        "architecture": {
-            "64bit": {
-                "url": "https://github.com/leisure462/zed-globalization/releases/download/v$version/zed-windows.zip"
-            }
-        }
+  "version": "0.226.4",
+  "description": "Zed Editor (Localized / 汉化版) - Preview",
+  "homepage": "https://github.com/leisure462/zed-globalization",
+  "license": "GPL-3.0-only",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/leisure462/zed-globalization/releases/download/v0.226.4/zedg-zh-cn-windows-x86_64-v0.226.4.zip",
+      "hash": "195f5c814564a06195758bf7dbc7fc0647e2e07fc4634705a532d04493fd6988"
     }
+  },
+  "bin": "ZedG.exe",
+  "shortcuts": [
+    [
+      "ZedG.exe",
+      "ZedG"
+    ]
+  ],
+  "checkver": {
+    "github": "https://github.com/leisure462/zed-globalization"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/leisure462/zed-globalization/releases/download/v$version/zed-windows.zip"
+      }
+    }
+  }
 }
