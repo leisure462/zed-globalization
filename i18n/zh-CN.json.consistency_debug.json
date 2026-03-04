@@ -1,39 +1,22 @@
 {
-    "record_count": 4,
+    "record_count": 2,
     "records": [
         {
             "event": "consistency_fix_start",
-            "issues_total": 9,
+            "issues_total": 1,
             "chunk_size": 12,
             "total_chunks": 1,
             "inconsistent": 0,
-            "glossary_violations": 4,
-            "keep_original_violations": 5
+            "glossary_violations": 1,
+            "keep_original_violations": 0
         },
         {
             "event": "consistency_fix_response",
             "chunk_index": 1,
             "total_chunks": 1,
             "attempt": 1,
-            "parsed_keys": 9,
-            "raw_preview": "{\"We want to clone the full_label to avoid borrowing it in the fold closure\": \"我们希望克隆 full_label 以避免在折叠闭包中借用它\", \"## Edit History Hunks\\n\\n```diff\\n\": \"## 编辑历史代码块\\n\\n```diff\\n\", \"## Expected Patch Hunks\\n\\n```diff\\n\": \"## 预期补丁代码块\\n\\n```diff\\n\", \"Run `npm install`\": \"运行 `npm install`\", \"Case 1: Windows should still exist after cancelling quit\": \"用例 1: 取消退出后 Windows 应仍然存在\", \"Case 2: Windows should still exist after cancelling quit\": \"用例 2: 取消退出后 Windows 应仍然存在\", \"Case 3: Windows should still exist after cancelling quit\": \"用例 3: 取消退出后 Windows 应仍然存在\", \"expected 2 restored windows, got {}\": \"预期恢复 2 个 Windows,实际得到 {}\", \"cargo::warning=Info: using '{git_sha}' hash for ZED_COMMIT_SHA env var\": \"信息:使用 '{git_sha}' 哈希作为 ZED_COMMIT_SHA 环境变量\"}"
-        },
-        {
-            "event": "consistency_fix_start",
-            "issues_total": 4,
-            "chunk_size": 12,
-            "total_chunks": 1,
-            "inconsistent": 0,
-            "glossary_violations": 3,
-            "keep_original_violations": 1
-        },
-        {
-            "event": "consistency_fix_response",
-            "chunk_index": 1,
-            "total_chunks": 1,
-            "attempt": 1,
-            "parsed_keys": 4,
-            "raw_preview": "{\"## Edit History Hunks\\n\\n```diff\\n\": \"## 编辑历史代码块\\n\\n```diff\\n\", \"## Expected Patch Hunks\\n\\n```diff\\n\": \"## 预期补丁代码块\\n\\n```diff\\n\", \"Run `npm install`\": \"运行 `npm install`\", \"cargo::warning=Info: using '{git_sha}' hash for ZED_COMMIT_SHA env var\": \"cargo::warning=信息: 使用 '{git_sha}' 哈希作为 ZED_COMMIT_SHA 环境变量\"}"
+            "parsed_keys": 1,
+            "raw_preview": "{\"failed to create shell connection\": \"创建 Shell 连接失败\"}"
         }
     ]
 }
