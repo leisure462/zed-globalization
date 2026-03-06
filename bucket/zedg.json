@@ -1,12 +1,12 @@
 {
-    "version": "0.226.4",
+    "version": "0.226.5",
     "description": "Zed Editor (Localized / 汉化版)",
     "homepage": "https://github.com/leisure462/zed-globalization",
     "license": "GPL-3.0-only",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/leisure462/zed-globalization/releases/download/v0.226.4/zedg-zh-cn-windows-x86_64-v0.226.4.zip",
-            "hash": "195f5c814564a06195758bf7dbc7fc0647e2e07fc4634705a532d04493fd6988"
+            "url": "https://github.com/leisure462/zed-globalization/releases/download/v0.226.5/zedg-zh-cn-windows-x86_64-v0.226.5.zip",
+            "hash": "7c3997e4c800fadd6263f5bdb3537dfc66cf20353751ce753f71e7780e0c9324"
         }
     },
     "bin": "ZedG.exe",
