@@ -2,8 +2,8 @@
 """
 编译前补丁脚本：修复 Agent 插件环境变量被覆盖问题。
 
-补丁点 1: 删除 agent_server_store.rs 中强制清空 ANTHROPIC_API_KEY 的代码
-补丁点 2: 在 claude.rs 的 connect() 中透传系统环境变量（与 codex.rs 模式一致）
+补丁点 1: 删除强制清空 ANTHROPIC_API_KEY 的代码（兼容新旧两种位置）
+补丁点 2: 透传 Claude Code 相关系统环境变量（兼容新旧两种文件）
 
 用法: python3 patch_agent_env.py [--source-root zed] [--dry-run]
 """
@@ -20,61 +20,9 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 PATCH_MARKER = "[ZED_GLOBALIZATION_PATCH]"
 
-
-def patch_remove_api_key_clear(source_root: Path, dry_run: bool) -> bool:
-    """补丁点 1: 删除强制清空 ANTHROPIC_API_KEY 的代码行。"""
-    target = source_root / "crates/project/src/agent_server_store.rs"
-    name = "agent_server_store.rs"
-
-    if not target.exists():
-        print(f"  WARN: {name} 不存在，跳过")
-        return False
-
-    content = target.read_text(encoding="utf-8")
-
-    if PATCH_MARKER in content:
-        print(f"  SKIP: {name} 已包含补丁标记，跳过")
-        return True
-
-    old_line = 'env.insert("ANTHROPIC_API_KEY".into(), "".into());'
-    if old_line not in content:
-        print(f"  WARN: {name} 中未找到目标代码片段，上游可能已修改，跳过")
-        return False
-
-    new_line = f"// {PATCH_MARKER} 已删除强制清空 ANTHROPIC_API_KEY"
-    patched = content.replace(old_line, new_line, 1)
-
-    if dry_run:
-        print(f"  DRY-RUN: {name} 将替换目标代码行")
-    else:
-        target.write_text(patched, encoding="utf-8")
-        print(f"  OK: {name} 补丁成功")
-    return True
-
-
-def patch_claude_env_passthrough(source_root: Path, dry_run: bool) -> bool:
-    """补丁点 2: 在 claude.rs connect() 中透传系统环境变量。"""
-    target = source_root / "crates/agent_servers/src/claude.rs"
-    name = "claude.rs"
-
-    if not target.exists():
-        print(f"  WARN: {name} 不存在，跳过")
-        return False
-
-    content = target.read_text(encoding="utf-8")
-
-    if PATCH_MARKER in content:
-        print(f"  SKIP: {name} 已包含补丁标记，跳过")
-        return True
-
-    old_snippet = "let extra_env = load_proxy_env(cx);"
-    if old_snippet not in content:
-        print(f"  WARN: {name} 中未找到目标代码片段，上游可能已修改，跳过")
-        return False
-
-    new_snippet = """\
-let mut extra_env = load_proxy_env(cx); // {marker}
-        // 透传 Claude Code 相关系统环境变量
+# 需要透传的环境变量注入代码（Rust）
+ENV_PASSTHROUGH_SNIPPET = """\
+// {marker} 透传 Claude Code 相关系统环境变量
         for var_name in [
             "ANTHROPIC_API_KEY",
             "ANTHROPIC_BASE_URL",
@@ -92,16 +40,93 @@ let mut extra_env = load_proxy_env(cx); // {marker}
             {{
                 extra_env.insert(key, val);
             }}
-        }}""".format(marker=PATCH_MARKER)
+        }}"""
 
-    patched = content.replace(old_snippet, new_snippet, 1)
 
+def _read(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def _write(path: Path, content: str, dry_run: bool, name: str) -> None:
     if dry_run:
-        print(f"  DRY-RUN: {name} 将注入环境变量透传代码")
+        print(f"  DRY-RUN: {name} 将被修改")
     else:
-        target.write_text(patched, encoding="utf-8")
+        path.write_text(content, encoding="utf-8")
         print(f"  OK: {name} 补丁成功")
-    return True
+
+
+def patch_remove_api_key_clear(source_root: Path, dry_run: bool) -> bool:
+    """补丁点 1: 删除强制清空 ANTHROPIC_API_KEY 的代码行。
+
+    旧版在 agent_server_store.rs，新版在 custom.rs (CLAUDE_AGENT_NAME 分支)。
+    """
+    candidates = [
+        source_root / "crates/project/src/agent_server_store.rs",
+        source_root / "crates/agent_servers/src/custom.rs",
+    ]
+    old_line = 'extra_env.insert("ANTHROPIC_API_KEY".into(), "".into());'
+    # 旧版写法用 env 而非 extra_env
+    old_line_legacy = 'env.insert("ANTHROPIC_API_KEY".into(), "".into());'
+
+    for target in candidates:
+        name = target.name
+        content = _read(target)
+        if content is None:
+            continue
+        if PATCH_MARKER in content and "已删除强制清空 ANTHROPIC_API_KEY" in content:
+            print(f"  SKIP: {name} 已包含补丁标记，跳过")
+            return True
+
+        for needle in (old_line, old_line_legacy):
+            if needle in content:
+                replacement = f"// {PATCH_MARKER} 已删除强制清空 ANTHROPIC_API_KEY"
+                patched = content.replace(needle, replacement, 1)
+                _write(target, patched, dry_run, name)
+                return True
+
+    print("  WARN: 未找到强制清空 ANTHROPIC_API_KEY 的代码，上游可能已修改，跳过")
+    return False
+
+
+def patch_env_passthrough(source_root: Path, dry_run: bool) -> bool:
+    """补丁点 2: 在 connect() 中透传系统环境变量。
+
+    旧版 claude.rs + custom.rs 并存，新版仅 custom.rs。对所有匹配文件注入。
+    """
+    candidates = [
+        source_root / "crates/agent_servers/src/claude.rs",
+        source_root / "crates/agent_servers/src/custom.rs",
+    ]
+    anchor = "let mut extra_env = load_proxy_env(cx);"
+    anchor_legacy = "let extra_env = load_proxy_env(cx);"
+    patched_any = False
+
+    for target in candidates:
+        name = target.name
+        content = _read(target)
+        if content is None:
+            continue
+        if PATCH_MARKER in content and "透传 Claude Code" in content:
+            print(f"  SKIP: {name} 已包含补丁标记，跳过")
+            patched_any = True
+            continue
+
+        for needle in (anchor, anchor_legacy):
+            if needle not in content:
+                continue
+            new_anchor = "let mut extra_env = load_proxy_env(cx);"
+            inject = ENV_PASSTHROUGH_SNIPPET.format(marker=PATCH_MARKER)
+            replacement = f"{new_anchor}\n{inject}"
+            patched = content.replace(needle, replacement, 1)
+            _write(target, patched, dry_run, name)
+            patched_any = True
+            break
+
+    if not patched_any:
+        print("  WARN: 未找到 load_proxy_env 调用，上游可能已修改，跳过")
+    return patched_any
 
 
 def main() -> int:
@@ -134,8 +159,8 @@ def main() -> int:
     print("[补丁 1] 删除强制清空 ANTHROPIC_API_KEY")
     r1 = patch_remove_api_key_clear(source_root, args.dry_run)
 
-    print("[补丁 2] Claude Code connect() 透传系统环境变量")
-    r2 = patch_claude_env_passthrough(source_root, args.dry_run)
+    print("[补丁 2] 透传 Claude Code 相关系统环境变量")
+    r2 = patch_env_passthrough(source_root, args.dry_run)
 
     print()
     if r1 and r2:
