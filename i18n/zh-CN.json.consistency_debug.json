@@ -1,6 +1,23 @@
 {
-    "record_count": 2,
+    "record_count": 4,
     "records": [
+        {
+            "event": "consistency_fix_start",
+            "issues_total": 3,
+            "chunk_size": 12,
+            "total_chunks": 1,
+            "inconsistent": 0,
+            "glossary_violations": 3,
+            "keep_original_violations": 0
+        },
+        {
+            "event": "consistency_fix_response",
+            "chunk_index": 1,
+            "total_chunks": 1,
+            "attempt": 1,
+            "parsed_keys": 3,
+            "raw_preview": "{\"Failed to run git diff --numstat:\\n{}\": \"运行 git diff --numstat 失败：\\n{}\", \"Expected a pending tool call from thread-b query\": \"对话线程-b 查询应返回待处理工具调用\", \"Expected thread-b's tool call after thread-a's was authorized\": \"对话线程-a 授权后应返回对话线程-b 的工具调用\"}"
+        },
         {
             "event": "consistency_fix_start",
             "issues_total": 1,
@@ -16,7 +33,7 @@
             "total_chunks": 1,
             "attempt": 1,
             "parsed_keys": 1,
-            "raw_preview": "{\"failed to create shell connection\": \"创建 Shell 连接失败\"}"
+            "raw_preview": "{\"Failed to run git diff --numstat:\\n{}\": \"运行 git diff --numstat 失败：\\n{}\"}"
         }
     ]
 }
