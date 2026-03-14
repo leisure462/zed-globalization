@@ -31052,7 +31052,10 @@
         "{prefix}_{count}": "",
         "Should have exactly 1 Rust hint initially, got: {rs_hints:?}": "初始应恰好有 1 个 Rust 提示,实际得到: {rs_hints:?}",
         "Should have exactly 1 TypeScript hint initially, got: {ts_hints:?}": "初始应恰好有 1 个 TypeScript 提示,实际得到: {ts_hints:?}",
-        "Rust hints should still be present after editing. Got: {rs_hints:?}": "编辑后 Rust 提示应仍然存在。实际得到: {rs_hints:?}"
+        "Rust hints should still be present after editing. Got: {rs_hints:?}": "编辑后 Rust 提示应仍然存在。实际得到: {rs_hints:?}",
+        "fn main() {\\n": "",
+        "    let v{i} = {i};\\n": "",
+        "}\\n": ""
     },
     "zed/crates/editor/src/inlays.rs": {
         "not real": "非真实",
