@@ -5879,7 +5879,8 @@
         "negative": "负面",
         "edit_prediction_jumps": "",
         "queue_prediction_refresh called with non-store provider": "queue_prediction_refresh 调用了非存储提供者",
-        "Edit Prediction Settled": "编辑预测已稳定"
+        "Edit Prediction Settled": "编辑预测已稳定",
+        "Failed to fetch experiments: {:?}\\nBody: {}": "获取实验失败: {:?}\n响应体: {}"
     },
     "zed/crates/edit_prediction_cli/src/filter_languages.rs": {
         "dynamic_prompts": "",
