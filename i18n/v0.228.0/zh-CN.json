@@ -41549,7 +41549,7 @@
         "Attempting to resolve code actions {:?}": "",
         "Failed to resolve code action {:?} with language server {}": "",
         "No code actions were resolved, continuing": "",
-        "code action '{}' with title \"{}\" on server {}": "服务器 {} 上的代码操作 '{}',标题为 \"{}\"",
+        "code action '{}' with title \"{}\" on server {}": "服务器 {} 上标题为 \"{}\" 的代码操作 '{}'",
         "Executing {}": "",
         "Failed to resolve {}. Error: {}": "",
         "No changes for code action. Skipping {}": "",
