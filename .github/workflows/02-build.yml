@@ -44,6 +44,8 @@ env:
   SCCACHE_RECACHE_THIRD_PARTY_DEPS: "1"
   SCCACHE_CACHE_SIZE: "10G"
   SCCACHE_IDLE_TIMEOUT: "0"
+  # === 网络稳定性 ===
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
   # ===========================================================================
