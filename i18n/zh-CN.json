@@ -10276,7 +10276,9 @@
         "selected index should point to a match": "选中的索引应指向一个匹配项",
         "selected match should map to a candidate": "选中的匹配项应映射到一个候选项",
         "current language should map to a candidate": "当前语言应映射到一个候选项",
-        "typescript_file.ts": ""
+        "typescript_file.ts": "",
+        "fn main() {}\\n": "",
+        "const value = 1;\\n": ""
     },
     "zed/crates/language_tools/src/key_context_view.rs": {
         " ": "",
@@ -60846,7 +60848,9 @@
         "[tool] {name} canceled": "[工具] {name} 已取消",
         "[eval-cli] error event": "[eval-cli] 错误事件",
         "[eval-cli] retry: {status:?}": "[eval-cli] 重试: {status:?}",
-        "[eval-cli] subagent spawned: {session_id}": "[eval-cli] 子助手已生成: {session_id}"
+        "[eval-cli] subagent spawned: {session_id}": "[eval-cli] 子助手已生成: {session_id}",
+        "\\\"high\\\"": "",
+        "\\n[eval-cli] stopped: {reason:?}": "\n[eval-cli] 已停止: {reason:?}"
     },
     "zed/crates/gpui/examples/active_state_bug.rs": {
         "Click me": "点击我",
