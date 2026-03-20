@@ -46740,7 +46740,9 @@
         "database is locked": "数据库已锁定",
         "BEGIN IMMEDIATE": "",
         "CREATE TABLE test(col TEXT)": "",
-        "ROLLBACK": ""
+        "ROLLBACK": "",
+        "Initialize query failed to execute: {}\\n\\nCaused by:\\n{err:#}": "初始化查询执行失败: {}\\n\\n原因:\\n{err:#}",
+        "Initialize query failed to execute after retries: {}\\n\\nCaused by:\\n{err:#}": "重试后初始化查询仍执行失败: {}\\n\\n原因:\\n{err:#}"
     },
     "zed/crates/sqlez/src/typed_statements.rs": {
         "Bindings failed": "绑定失败",
