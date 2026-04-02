@@ -5,6 +5,19 @@ on:
     - cron: "0 0,8,16 * * *" # 每日三次（UTC 0/8/16 点）检查 Zed 新版本
   workflow_dispatch:
     inputs:
+      version:
+        description: "指定版本号（留空则自动检测最新版，如 v0.228.0）"
+        type: string
+        required: false
+        default: ""
+      release_type:
+        description: "版本类型（指定版本号时忽略此项）"
+        type: choice
+        options:
+          - auto
+          - stable
+          - pre-release
+        default: auto
       mode:
         description: "提取模式"
         type: choice
@@ -79,12 +92,49 @@ jobs:
           INCLUDES="[]"
 
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # 手动触发：始终处理最新版本（含 pre-release）
-            LATEST_JSON=$(curl -s "https://api.github.com/repos/zed-industries/zed/releases?per_page=1")
-            V=$(echo "$LATEST_JSON" | jq -r '.[0].tag_name')
-            P=$(echo "$LATEST_JSON" | jq -r '.[0].prerelease')
+            INPUT_VER="${{ inputs.version }}"
+            RELEASE_TYPE="${{ inputs.release_type }}"
+
+            if [ -n "$INPUT_VER" ]; then
+              # 指定了具体版本号
+              REL_JSON=$(curl -s "https://api.github.com/repos/zed-industries/zed/releases/tags/${INPUT_VER}")
+              V=$(echo "$REL_JSON" | jq -r '.tag_name // empty')
+              if [ -z "$V" ] || [ "$V" == "null" ]; then
+                echo "::error::上游未找到版本 ${INPUT_VER}，请检查版本号"
+                exit 1
+              fi
+              P=$(echo "$REL_JSON" | jq -r '.prerelease')
+              echo "手动指定版本: $V (pre-release: $P)"
+
+            elif [ "$RELEASE_TYPE" == "stable" ]; then
+              # 仅 stable
+              V="$STABLE_TAG"
+              P="false"
+              if [ -z "$V" ] || [ "$V" == "null" ]; then
+                echo "::error::未找到上游 stable 版本"
+                exit 1
+              fi
+              echo "手动触发 stable: $V"
+
+            elif [ "$RELEASE_TYPE" == "pre-release" ]; then
+              # 仅 pre-release
+              V="$PRE_TAG"
+              P="true"
+              if [ -z "$V" ] || [ "$V" == "null" ]; then
+                echo "::error::未找到上游 pre-release 版本"
+                exit 1
+              fi
+              echo "手动触发 pre-release: $V"
+
+            else
+              # auto：取最新的一个 release（不管类型）
+              LATEST_JSON=$(curl -s "https://api.github.com/repos/zed-industries/zed/releases?per_page=1")
+              V=$(echo "$LATEST_JSON" | jq -r '.[0].tag_name')
+              P=$(echo "$LATEST_JSON" | jq -r '.[0].prerelease')
+              echo "手动触发 auto，处理版本: $V (pre-release: $P)"
+            fi
+
             INCLUDES=$(echo "$INCLUDES" | jq -c --arg v "$V" --arg p "$P" '. + [{"version": $v, "is_prerelease": $p}]')
-            echo "手动触发，处理版本: $V (pre-release: $P)"
           else
             # 定时触发：分别检查 stable 和 pre-release
             if [ -n "$STABLE_TAG" ] && [ "$STABLE_TAG" != "null" ]; then
