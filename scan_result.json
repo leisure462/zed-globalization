@@ -1,5 +1,5 @@
 {
-  "version": "v0.231.0-pre",
+  "version": "v0.231.1-pre",
   "files": [
     "crates/acp_thread/src/acp_thread.rs",
     "crates/acp_thread/src/connection.rs",
@@ -1576,6 +1576,7 @@
     "crates/ui/src/components/progress.rs",
     "crates/ui/src/components/progress/circular_progress.rs",
     "crates/ui/src/components/progress/progress_bar.rs",
+    "crates/ui/src/components/redistributable_columns.rs",
     "crates/ui/src/components/right_click_menu.rs",
     "crates/ui/src/components/scrollbar.rs",
     "crates/ui/src/components/stack.rs",

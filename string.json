@@ -23833,7 +23833,6 @@
         "acp-beta": "",
         "agent-sharing": "",
         "diff-review": "",
-        "git-graph": "",
         "streaming-edit-file-tool": "",
         "update-plan-tool": "",
         "project-panel-undo-redo": ""
@@ -25223,11 +25222,11 @@
         "Loading": "",
         "No commits found": "",
         "Graph": "",
-        "graph-canvas": "",
         "Description": "",
         "Date": "",
         "Author": "",
         "Commit": "",
+        "graph-canvas": "",
         "git-graph-commits": "",
         "GitGraph": "",
         "Git Graph": "",
@@ -47549,6 +47548,9 @@
         "Terminal Dock": "",
         "Where to dock the terminal panel.": "",
         "terminal.dock": "",
+        "Terminal Panel Flexible Sizing": "",
+        "Whether the terminal panel should use flexible (proportional) sizing when docked to the left or right.": "",
+        "terminal.flexible": "",
         "Show Count Badge": "",
         "Show a badge on the terminal panel icon with the count of open terminals.": "",
         "terminal.show_count_badge": "",
@@ -47644,6 +47646,9 @@
         "Agent Panel Dock": "",
         "Where to dock the agent panel.": "",
         "agent.dock": "",
+        "Agent Panel Flexible Sizing": "",
+        "Whether the agent panel should use flexible (proportional) sizing when docked to the left or right.": "",
+        "agent.flexible": "",
         "Agent Panel Default Width": "",
         "Default width when the agent panel is docked to the left or right.": "",
         "agent.default_width": "",
@@ -54387,8 +54392,6 @@
         "Capped Count": ""
     },
     "zed/crates/ui/src/components/data_table.rs": {
-        "column-resize-handle": "",
-        "resize-handles": "",
         "table_row": "",
         "table-{}": "",
         "table": "",
@@ -55109,6 +55112,10 @@
         "100%": "",
         "Complete": "",
         "filled": ""
+    },
+    "zed/crates/ui/src/components/redistributable_columns.rs": {
+        "column-resize-handle": "",
+        "resize-handles": ""
     },
     "zed/crates/ui/src/components/scrollbar.rs": {
         "snake_case": "",
