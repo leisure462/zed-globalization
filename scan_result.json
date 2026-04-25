@@ -1,5 +1,5 @@
 {
-  "version": "v0.233.9",
+  "version": "v0.233.10",
   "files": [
     "crates/acp_thread/src/acp_thread.rs",
     "crates/acp_thread/src/connection.rs",
@@ -1753,7 +1753,6 @@
     "crates/worktree/tests/integration/main.rs",
     "crates/worktree/tests/integration/worktree_settings.rs",
     "crates/worktree_benchmarks/src/main.rs",
-    "crates/x_ai/src/completion.rs",
     "crates/x_ai/src/x_ai.rs",
     "crates/zed/build.rs",
     "crates/zed/src/main.rs",
