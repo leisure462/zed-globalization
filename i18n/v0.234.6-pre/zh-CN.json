@@ -7147,7 +7147,10 @@
         "Right-click for more options": "右键查看更多选项",
         "{alt_as_text}-click to disable\nright-click for more options": "{alt_as_text}-点击以禁用\n右键点击查看更多选项",
         "{alt_as_text}-click to add a breakpoint\nright-click for more options": "{alt_as_text}-点击以添加断点\n右键点击查看更多选项",
-        "{alt_as_text}-click to add a bookmark\nright-click for more options": "{alt_as_text}-点击以添加书签\n右键点击查看更多选项"
+        "{alt_as_text}-click to add a bookmark\nright-click for more options": "{alt_as_text}-点击以添加书签\n右键点击查看更多选项",
+        "{alt_as_text}-click to disable\\nright-click for more options": "{alt_as_text}-点击禁用\\n右键查看更多选项",
+        "{alt_as_text}-click to add a breakpoint\\nright-click for more options": "{alt_as_text}-点击添加断点\\n右键查看更多选项",
+        "{alt_as_text}-click to add a bookmark\\nright-click for more options": "{alt_as_text}-点击添加书签\\n右键查看更多选项"
     },
     "zed/crates/editor/src/element.rs": {
         "drag state can never be in ready state after drag": "",
@@ -56055,7 +56058,8 @@
         "d s a": "",
         "I'm 'goˇod'": "",
         "I'm ˇ\"good\"": "",
-        "I'm ˇ{ good }": ""
+        "I'm ˇ{ good }": "",
+        "I'm ˇ\\\"good\\\"": ""
     },
     "zed/crates/vim/src/test/neovim_backed_test_context.rs": {
         " ": "",
@@ -70443,7 +70447,7 @@
         "empty_diff": "",
         "hunk_spans_entire_excerpt": "",
         "replacement_inside_excerpt": "",
-        "Test '{}': filtered diff mismatch.\nExpected:\n{}\nGot:\n{}": "测试 '{}': 过滤后的差异不匹配。\n预期:\n{}\n实际:\n{}",
+        "Test '{}': filtered diff mismatch.\nExpected:\n{}\nGot:\n{}": "测试 '{}': 过滤后的差异不匹配.\n期望:\n{}\n实际:\n{}",
         "Test '{}': line offset mismatch. Expected {}, got {}": "测试 '{}': 行偏移不匹配。预期 {},实际 {}",
         "edit_outside_excerpt_no_reversal": "",
         "edit_inside_excerpt_with_reversal": "",
@@ -70455,7 +70459,7 @@
         "hunk_context_not_found_skipped": "",
         "hunk_context_found_applied": "",
         "multiple_hunks_partial_match": "",
-        "Test '{}': expected:\n{}\ngot:\n{}": "测试 '{}': 预期:\n{}\n实际:\n{}",
+        "Test '{}': expected:\n{}\ngot:\n{}": "测试 '{}': 期望:\n{}\n实际:\n{}",
         "unicode_extension_cjk": "",
         "日": "",
         "日本語": "",
@@ -70491,7 +70495,12 @@
         "Expected zero reversal when edit history is for different file": "当编辑历史针对不同文件时,预期零反转",
         "Ratio should be valid even with lenient fallback, got {}": "即使使用宽松回退,比率也应有效,实际 {}",
         "Should handle failed diff application gracefully": "应优雅处理差异应用失败的情况",
-        "Expected high reversal ratio when prediction exactly reverses the most recent edit, got {}": "当预测完全反转最近编辑时,预期高反转率,实际 {}"
+        "Expected high reversal ratio when prediction exactly reverses the most recent edit, got {}": "当预测完全反转最近编辑时,预期高反转率,实际 {}",
+        "print(\\\"Hello, World!\\\")": "",
+        "sys.(\\\"Hello, World!\\\")": "",
+        "sys.stdout.write(\\\"Hello, World!\\\\n\\\")": "",
+        "Test '{}': filtered diff mismatch.\\nExpected:\\n{}\\nGot:\\n{}": "测试 '{}': 过滤后的差异不匹配.\\n期望:\\n{}\\n实际:\\n{}",
+        "Test '{}': expected:\\n{}\\ngot:\\n{}": "测试 '{}': 期望:\\n{}\\n实际:\\n{}"
     },
     "zed/crates/edit_prediction_metrics/src/tokenize.rs": {
         "hello world": "",
