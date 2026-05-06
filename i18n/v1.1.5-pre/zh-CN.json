@@ -64426,7 +64426,8 @@
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==": "",
         ".png": "",
         "queued [@{image_name}]({expected_uri}) message": "",
-        "queued message editor not synced": "队列消息编辑器未同步"
+        "queued message editor not synced": "队列消息编辑器未同步",
+        "\\n": ""
     },
     "zed/crates/agent_ui/src/conversation_view/thread_view.rs": {
         "granularity-trigger": "",
